@@ -1,0 +1,51 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyd
+*.so
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+MANIFEST
+
+# ── Virtual environments ───────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+.env/
+
+# ── uv ────────────────────────────────────────────────────────────────────────
+# uv.lock is intentionally committed — do NOT add it here
+
+# ── Jupyter ───────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ── ML artefacts ──────────────────────────────────────────────────────────────
+# Trained model weights — store in model registry, not git
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Processed data (large files) — raw CSVs are also excluded by default
+data/processed/
+data/raw/*.csv
+data/raw/*.parquet
+data/raw/*.json
+
+# ── IDE / OS ──────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ── Misc ──────────────────────────────────────────────────────────────────────
+.env
+*.log

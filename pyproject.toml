@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spotify-ml-project"
+version = "0.1.0"
+description = "Spotify audio feature analysis, clustering, and recommendation system"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "matplotlib>=3.9",
+    "numpy>=2.1",
+    "pandas>=2.2",
+    "plotly>=5.24",
+    "scikit-learn>=1.6",
+    "seaborn>=0.13",
+    "streamlit>=1.43",
+    "torch>=2.6",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=6.29",
+]
