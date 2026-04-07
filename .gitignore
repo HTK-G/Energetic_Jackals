@@ -38,6 +38,9 @@ data/raw/*.csv
 data/raw/*.parquet
 data/raw/*.json
 
+!data/raw/dataset.csv
+!data/processed/clean_dataset_final.csv
+
 # ── IDE / OS ──────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
