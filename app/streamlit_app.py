@@ -230,11 +230,13 @@ def main() -> None:
             format_func=lambda index: _song_option_label(engine, index),
             key="recommendation_song_selection",
         )
+
         recommendation_mode = st.radio(
             "Recommendation mode",
             options=["embedding", "cluster-based"],
             horizontal=True,
         )
+
         top_k = st.slider("Top-k similar songs", min_value=3, max_value=20, value=10)
 
         if recommendation_mode == "embedding":
@@ -242,7 +244,40 @@ def main() -> None:
         else:
             recommendation_frame = engine.recommend_by_cluster(selected_index, top_k=top_k)
 
-        st.dataframe(recommendation_frame, use_container_width=True)
+        feature_columns = [
+            column
+            for column in ["energy", "acousticness", "instrumentalness", "tempo", "valence"]
+            if column in catalog.columns
+        ]
+
+        recommendation_features = catalog.loc[recommendation_frame.index, feature_columns].copy()
+        recommendation_frame = recommendation_frame.join(recommendation_features)
+
+        st.subheader("Refine by Audio Features")
+        st.caption(
+            "Use these controls to refine the recommended songs based on audio features such as energy, acousticness, and instrumentalness."
+        )
+
+        min_energy = st.slider("Minimum energy", 0.0, 1.0, 0.0, 0.05)
+        min_acousticness = st.slider("Minimum acousticness", 0.0, 1.0, 0.0, 0.05)
+        min_instrumentalness = st.slider("Minimum instrumentalness", 0.0, 1.0, 0.0, 0.05)
+
+        filtered_recommendation_frame = recommendation_frame.copy()
+
+        filtered_recommendation_frame = filtered_recommendation_frame[
+            (filtered_recommendation_frame["energy"] >= min_energy)
+            & (filtered_recommendation_frame["acousticness"] >= min_acousticness)
+            & (filtered_recommendation_frame["instrumentalness"] >= min_instrumentalness)
+        ]
+        st.caption(
+            f"Filters: energy ≥ {min_energy}, acousticness ≥ {min_acousticness}, instrumentalness ≥ {min_instrumentalness}"
+        )
+        st.write(f"{len(filtered_recommendation_frame)} songs match the current filters.")
+
+        if filtered_recommendation_frame.empty:
+            st.warning("No recommended songs match your filters.")
+        else:
+            st.dataframe(filtered_recommendation_frame, use_container_width=True)
 
     with tab_clusters:
         metric_columns = st.columns(4)
