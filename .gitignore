@@ -33,13 +33,12 @@ env/
 *.safetensors
 
 # Processed data (large files) — raw CSVs are also excluded by default
-data/processed/
+data/processed/*
+!data/processed/clean_dataset_final.csv
 data/raw/*.csv
 data/raw/*.parquet
 data/raw/*.json
-
 !data/raw/dataset.csv
-!data/processed/clean_dataset_final.csv
 
 # ── IDE / OS ──────────────────────────────────────────────────────────────────
 .DS_Store
