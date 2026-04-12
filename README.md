@@ -1,139 +1,93 @@
-# Spotify ML Project
+# Spotify Music Recommendation System
 
-A modular machine learning project for exploring, clustering, and recommending songs from the Spotify Audio Features dataset.
+**Team**: Energetic Jackals
+**Repo**: `HTK-G/Energetic_Jackals`
 
-Dataset source: https://www.kaggle.com/datasets/tomigelo/spotify-audio-features
+A Streamlit web app that recommends songs based on audio feature similarity, with clustering analysis and visualization. Built on the [Spotify Tracks Dataset](https://www.kaggle.com/datasets/maharshipandya/-spotify-tracks-dataset) (~89,500 deduplicated tracks).
 
-The system is built around the Spotify Audio Features dataset containing roughly 130k songs with features such as danceability, energy, loudness, speechiness, acousticness, instrumentalness, liveness, valence, tempo, popularity, key, mode, and time signature.
+## Features
 
-## What The Project Does
+- **Song Search & Recommend** — Fuzzy search by song name or artist, then get top-K similar songs with cosine similarity scores and per-feature explanations (radar charts, text breakdowns).
+- **Three Recommendation Modes**:
+  - *Embedding (KNN)* — Nearest neighbors in the full 12D standardized feature space.
+  - *K-Means cluster* — Restrict recommendations to songs in the same cluster.
+  - *GMM posterior* — Rank songs by cosine similarity of their soft cluster membership vectors.
+- **Cluster Explorer** — Interactive PCA/UMAP scatter plots, hyperparameter tuning charts (elbow, silhouette, BIC), cluster profiling with auto-generated labels and genre breakdowns, evaluation metrics comparison.
 
-- Loads the Kaggle Spotify dataset from `data/raw/` or falls back to a deterministic demo dataset.
-- Cleans and preprocesses metadata and audio features into a reusable feature matrix.
-- Learns song embeddings with either PCA or a PyTorch autoencoder.
-- Clusters songs using a NumPy implementation of K-Means built from scratch.
-- Recommends related tracks through cosine similarity in embedding space or cluster-constrained retrieval.
-- Visualizes clusters, embeddings, feature correlations, and song-level audio profiles in Streamlit.
+## Setup
 
-## Repository Layout
-
-```text
-spotify-ml-project
-├── app/
-│   └── streamlit_app.py
-├── data/
-│   ├── processed/
-│   └── raw/
-├── notebooks/
-│   └── exploration.ipynb
-├── src/
-│   ├── data/
-│   │   ├── loader.py
-│   │   └── preprocessing.py
-│   ├── evaluation/
-│   │   └── metrics.py
-│   ├── models/
-│   │   ├── autoencoder.py
-│   │   ├── embeddings.py
-│   │   └── kmeans.py
-│   ├── recommender/
-│   │   ├── recommend.py
-│   │   └── similarity.py
-│   ├── utils/
-│   │   ├── constants.py
-│   │   └── demo_data.py
-│   └── visualization/
-│       └── plots.py
-├── pyproject.toml
-├── requirements.txt
-└── uv.lock
-```
-
-## Dataset Format
-
-The project expects a CSV with Spotify-style columns. The loader normalizes common variants such as `name` and `track_name`, and supports feature columns including:
-
-- `danceability`
-- `energy`
-- `loudness`
-- `speechiness`
-- `acousticness`
-- `instrumentalness`
-- `liveness`
-- `valence`
-- `tempo`
-- `duration_ms`
-- `popularity`
-- `key`
-- `mode`
-- `time_signature`
-
-Helpful metadata columns include song name, artist, album, and a track identifier. If some metadata is missing, the loader fills in safe defaults.
-
-## Setup With uv
-
-```bash
-uv venv
-source .venv/bin/activate
-uv pip install -r requirements.txt
-uv lock
-```
-
-You can also use uv's project workflow directly:
+Requires Python >= 3.11 and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync
 ```
 
-## Run The App
-
-Place the Kaggle CSV inside `data/raw/`, for example:
-
-```text
-data/raw/spotify_audio_features.csv
-```
-
-Then start the Streamlit UI:
+## Run the App
 
 ```bash
-uv run streamlit run app/streamlit_app.py
+uv run streamlit run app/app.py
 ```
 
-If no CSV is present, the app still runs end-to-end using a generated demo catalog.
+The app loads from `data/processed/clean_dataset_final.csv`.
 
-## How Recommendation Works
+## Dataset
 
-1. Audio features are cleaned, imputed, scaled, and encoded into a feature matrix.
-2. The project learns low-dimensional song embeddings using PCA or an autoencoder.
-3. Recommendations are produced by cosine similarity in embedding space.
-4. Cluster-based mode restricts candidates to songs from the same learned cluster before ranking by similarity.
+- **Source**: [maharshipandya/Spotify Tracks Dataset](https://www.kaggle.com/datasets/maharshipandya/-spotify-tracks-dataset)
+- **Cleaned file**: `data/processed/clean_dataset_final.csv` (89,578 rows, 21 columns)
+- **Key columns**: `track_name`, `artists`, `album_name`, `track_genre`, `all_genres`, plus 11 audio features (danceability, energy, loudness, speechiness, acousticness, instrumentalness, liveness, valence, tempo, key, mode)
 
-## How Clustering Works
+## Feature Engineering
 
-The clustering module implements K-Means directly in NumPy rather than calling `sklearn.cluster.KMeans`.
+The 11 audio features are transformed into a 12D standardized vector:
+- `key` (0–11 pitch class) is replaced with sine/cosine encoding (2 columns) to preserve cyclical distance.
+- `mode` is kept as binary (0 = minor, 1 = major).
+- All features are standardized with `StandardScaler`.
+- `popularity`, `time_signature`, `explicit`, `duration_ms` are excluded from the feature vector (see PLAN.md for rationale).
 
-The implementation includes:
+## Project Structure
 
-- centroid initialization with random or K-Means++ style seeding
-- assignment step through Euclidean distance minimization
-- centroid recomputation for each cluster
-- empty-cluster recovery logic
-- convergence checking through centroid movement tolerance
+```
+Energetic_Jackals/
+├── app/
+│   ├── app.py                  # Streamlit multi-page entry point
+│   ├── page_recommend.py       # Song search & recommendation page
+│   └── page_clusters.py        # Cluster explorer page
+├── data/
+│   └── processed/
+│       └── clean_dataset_final.csv
+├── notebooks/
+│   └── exploration.ipynb
+├── src/
+│   ├── features.py             # Feature engineering, encoding, scaling
+│   ├── recommend.py            # KNN + cluster-aware recommendation engine
+│   ├── clustering.py           # K-Means and GMM with hyperparameter tuning
+│   ├── evaluate.py             # Genre hit rate, internal/external cluster metrics
+│   └── explain.py              # Feature comparison, radar charts, explanations
+├── PLAN.md                     # Full implementation plan (Phases 1–4)
+├── CHANGELOG.md                # Track of all changes
+├── CLAUDE.md                   # Claude Code guidance
+├── pyproject.toml
+└── requirements.txt
+```
 
-## Main Modules
+## Implementation Status
 
-- `src/data`: dataset loading, schema normalization, preprocessing, and feature construction
-- `src/models`: PCA embeddings, PyTorch autoencoder embeddings, and scratch K-Means clustering
-- `src/recommender`: cosine similarity utilities and recommendation engine
-- `src/evaluation`: cluster and embedding quality metrics
-- `src/visualization`: Plotly charts for the app and notebook workflows
+| Phase | Description | Status |
+|-------|-------------|--------|
+| 1 | Baseline song-to-song recommendation (KNN, fuzzy search, feature explanations) | Done |
+| 2 | Clustering analysis — K-Means & GMM (2 of 4 algorithms), evaluation, visualization, cluster-aware recommendation | Done |
+| 2 | Clustering — DBSCAN & Agglomerative | Planned |
+| 3 | Playlist input, mood/scenario recommendation, feature importance | Planned |
+| 4 | App polish, optional extensions (Spotify API, diversity control, etc.) | Planned |
 
-## Extending The Project
+## Technical Stack
 
-The scaffold is intentionally modular so you can add:
-
-- contrastive or self-supervised representation learning
-- approximate nearest neighbor search
-- hybrid recommenders that combine popularity or metadata priors
-- cluster explainability and feature attribution
-- offline experiment tracking and model persistence
+| Component | Tool |
+|-----------|------|
+| Language | Python 3.11+ |
+| Data processing | pandas, numpy |
+| ML / Clustering | scikit-learn (KMeans, GaussianMixture, NearestNeighbors) |
+| Dimensionality reduction | scikit-learn (PCA), umap-learn (UMAP) |
+| Visualization | plotly (interactive Streamlit charts) |
+| String matching | rapidfuzz |
+| Web app | Streamlit |
