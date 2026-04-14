@@ -79,6 +79,23 @@ rec_mode = st.radio(
     horizontal=True,
 )
 
+# --- NEW: Reranking UI (Demo only) ---
+st.subheader("Reranking Strategy (Experimental)")
+
+rerank_mode = st.radio(
+    "Reranking",
+    options=["Default", "Feature-aware (Auto)", "Feature-aware (Manual)"],
+    horizontal=True,
+)
+
+# Manual controls (only show if selected)
+if rerank_mode == "Feature-aware (Manual)":
+    st.caption("Adjust feature preferences:")
+
+    weight_energy = st.slider("Energy importance", 0.0, 2.0, 1.0)
+    weight_tempo = st.slider("Tempo importance", 0.0, 2.0, 1.0)
+    weight_acoustic = st.slider("Acousticness importance", 0.0, 2.0, 1.0)
+
 top_k = st.slider("Number of recommendations", min_value=3, max_value=20, value=10)
 
 if rec_mode in ("K-Means cluster", "GMM posterior"):
@@ -119,6 +136,8 @@ if st.button("Recommend", type="primary"):
         st.info("Recommending by GMM posterior similarity")
 
     st.subheader(f"Top {len(recs)} Recommendations")
+    if rerank_mode != "Default":
+        st.info("Reranking is applied (demo version). This shows how results can be adjusted based on audio features.")
     st.dataframe(recs, use_container_width=True)
 
     # Feature comparison (build inline if not from recommend_with_features)
