@@ -1,6 +1,7 @@
 """KNN-based song recommendation with fuzzy search."""
 
 from __future__ import annotations
+from unittest import result
 
 import numpy as np
 import pandas as pd
@@ -25,19 +26,58 @@ class RecommendationEngine:
         )
         self.nn.fit(self.feature_matrix)
 
+    # def search_songs(self, query: str, limit: int = 10) -> pd.DataFrame:
+    #     """Fuzzy search for songs by track_name or artists."""
+    #     if not query.strip():
+    #         return self.df.head(limit)
+
+    #     labels = (self.df["track_name"] + " - " + self.df["artists"]).tolist()
+    #     matches = process.extract(query, labels, scorer=fuzz.WRatio, limit=limit)
+    #     indices = [m[2] for m in matches if m[1] >= 40]
+
+    #     if not indices:
+    #         return pd.DataFrame(columns=self.df.columns)
+
+    #     return self.df.iloc[indices][["track_name", "artists", "album_name", "track_genre", "popularity"]].copy()
+
     def search_songs(self, query: str, limit: int = 10) -> pd.DataFrame:
-        """Fuzzy search for songs by track_name or artists."""
-        if not query.strip():
-            return self.df.head(limit)
+        """Search songs with simple ranking: title prefix > title contains > artist contains > fuzzy fallback."""
+        normalized_query = query.strip().lower()
+        if not normalized_query:
+            return self.df.head(limit)[["track_name", "artists", "album_name", "track_genre", "popularity"]].copy()
 
-        labels = (self.df["track_name"] + " - " + self.df["artists"]).tolist()
-        matches = process.extract(query, labels, scorer=fuzz.WRatio, limit=limit)
-        indices = [m[2] for m in matches if m[1] >= 40]
+        df = self.df.copy()
 
-        if not indices:
-            return pd.DataFrame(columns=self.df.columns)
+        title_lower = df["track_name"].fillna("").str.lower()
+        artist_lower = df["artists"].fillna("").str.lower()
 
-        return self.df.iloc[indices][["track_name", "artists", "album_name", "track_genre", "popularity"]].copy()
+        # 1. exact title prefix
+        prefix_matches = df[title_lower.str.startswith(normalized_query)]
+
+        # 2. title contains
+        contains_matches = df[title_lower.str.contains(normalized_query, na=False)]
+
+        # 3. artist contains
+        artist_matches = df[artist_lower.str.contains(normalized_query, na=False)]
+
+        # combine in priority order, remove duplicates
+        combined = pd.concat([prefix_matches, contains_matches, artist_matches]).drop_duplicates()
+
+        # if enough results, return top ones directly
+        if len(combined) >= limit:
+            result = combined.head(limit)[["track_name", "artists", "album_name", "track_genre", "popularity"]].copy()
+            return result.reset_index(drop=True)
+
+        # 4. fuzzy fallback for remaining slots
+        labels = (df["track_name"] + " - " + df["artists"]).tolist()
+        matches = process.extract(query, labels, scorer=fuzz.WRatio, limit=limit * 2)
+        fuzzy_indices = [m[2] for m in matches if m[1] >= 60]
+
+        fuzzy_df = df.iloc[fuzzy_indices]
+        final = pd.concat([combined, fuzzy_df]).drop_duplicates().head(limit)
+
+        result = final[["track_name", "artists", "album_name", "track_genre", "popularity"]].copy()
+        return result.reset_index(drop=True)
 
     def _filter_same_name(self, song_index: int, indices: np.ndarray, distances: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Remove songs with the same track_name as the query (duplicate versions)."""
