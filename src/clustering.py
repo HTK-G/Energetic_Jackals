@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import numpy as np
-from sklearn.cluster import KMeans
+from custom_kmeans import CustomKMeans
 from sklearn.metrics import silhouette_score
 from sklearn.mixture import GaussianMixture
 
@@ -17,7 +17,7 @@ class ClusterResult:
     algorithm: str
     labels: np.ndarray
     n_clusters: int
-    model: KMeans | GaussianMixture
+    model: CustomKMeans | GaussianMixture
     # GMM-specific: soft posterior probabilities (n_songs, n_clusters)
     probabilities: np.ndarray | None = None
 
@@ -45,7 +45,7 @@ def tune_kmeans(
     result = TuningResult(k_range=list(k_range))
 
     for k in k_range:
-        km = KMeans(n_clusters=k, random_state=random_state, n_init=10)
+        km = CustomKMeans(n_clusters=k, random_state=random_state)
         labels = km.fit_predict(feature_matrix)
         result.inertias.append(float(km.inertia_))
         result.silhouette_scores.append(float(silhouette_score(feature_matrix, labels)))
@@ -62,7 +62,7 @@ def fit_kmeans(
     random_state: int = 42,
 ) -> ClusterResult:
     """Fit K-Means with a given K and return results."""
-    km = KMeans(n_clusters=n_clusters, random_state=random_state, n_init=10)
+    km = CustomKMeans(n_clusters=n_clusters, random_state=random_state)
     labels = km.fit_predict(feature_matrix)
     return ClusterResult(
         algorithm="K-Means",
