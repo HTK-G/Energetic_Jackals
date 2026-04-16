@@ -78,7 +78,8 @@ class RecommendationEngine:
 
         result = final[["track_name", "artists", "album_name", "track_genre", "popularity"]].copy()
         return result.reset_index(drop=True)
-
+    
+    # 1 playlist
     def _filter_same_name(self, song_index: int, indices: np.ndarray, distances: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Remove songs with the same track_name as the query (duplicate versions)."""
         query_name = self.df.iloc[song_index]["track_name"]
@@ -90,6 +91,53 @@ class RecommendationEngine:
         if len(keep) == 0:
             return np.array([], dtype=int), np.array([], dtype=float)
         return indices[keep], distances[keep]
+    
+
+    def _combine_query_vectors(self, song_indices: list[int]) -> np.ndarray:
+        """Combine multiple seed songs into one query vector by averaging."""
+        vectors = self.feature_matrix[song_indices]
+        return vectors.mean(axis=0)
+    
+
+    def recommend_from_playlist(self, song_indices: list[int], top_k: int = 10) -> pd.DataFrame:
+        """Recommend songs based on multiple seed songs."""
+        if len(song_indices) == 0:
+            return pd.DataFrame(columns=["track_name", "artists", "track_genre", "popularity", "similarity"])
+
+        query_vector = self._combine_query_vectors(song_indices).reshape(1, -1)
+        distances, indices = self.nn.kneighbors(query_vector, n_neighbors=self.k_neighbors)
+
+        distances = distances.flatten()
+        indices = indices.flatten()
+
+        # Remove the selected seed songs themselves
+        seed_set = set(song_indices)
+        keep = [i for i, idx in enumerate(indices) if idx not in seed_set]
+        keep = np.array(keep, dtype=int)
+
+        if len(keep) == 0:
+            return pd.DataFrame(columns=["track_name", "artists", "track_genre", "popularity", "similarity"])
+
+        indices = indices[keep]
+        distances = distances[keep]
+
+        # Remove songs with the same track_name as any seed song
+        seed_names = set(self.df.iloc[song_indices]["track_name"].tolist())
+        keep = [i for i, idx in enumerate(indices) if self.df.iloc[idx]["track_name"] not in seed_names]
+        keep = np.array(keep, dtype=int)
+
+        if len(keep) == 0:
+            return pd.DataFrame(columns=["track_name", "artists", "track_genre", "popularity", "similarity"])
+
+        indices = indices[keep][:top_k]
+        distances = distances[keep][:top_k]
+
+        similarities = 1 - distances
+
+        result = self.df.iloc[indices][["track_name", "artists", "track_genre", "popularity"]].copy()
+        result["similarity"] = similarities
+        result = result.reset_index(drop=True)
+        return result
 
     def recommend(self, song_index: int, top_k: int = 10) -> pd.DataFrame:
         """Return top-K most similar songs (excluding same-name duplicates)."""
@@ -234,3 +282,41 @@ class RecommendationEngine:
         """Human-readable label for a song."""
         row = self.df.iloc[index]
         return f"{row['track_name']} - {row['artists']}"
+
+def rerank_feature_auto(
+    engine: RecommendationEngine,
+    recs: pd.DataFrame,
+    seed_index: int,
+    alpha: float = 0.15,
+    ) -> pd.DataFrame:
+    """Simple feature-aware reranking using distance to the query song vector."""
+    if recs.empty:
+        return recs
+
+    query_vec = engine.feature_matrix[seed_index]
+    rerank_scores = []
+
+    for i in range(len(recs)):
+        rec_name = recs.iloc[i]["track_name"]
+        rec_artist = recs.iloc[i]["artists"]
+
+        match = engine.df[
+            (engine.df["track_name"] == rec_name) &
+            (engine.df["artists"] == rec_artist)
+        ]
+
+        if len(match) == 0:
+            rerank_scores.append(recs.iloc[i]["similarity"])
+            continue
+
+        rec_idx = match.index[0]
+        rec_vec = engine.feature_matrix[rec_idx]
+
+        feature_dist = np.linalg.norm(rec_vec - query_vec)
+        new_score = float(recs.iloc[i]["similarity"]) - alpha * feature_dist
+        rerank_scores.append(new_score)
+
+    reranked = recs.copy()
+    reranked["rerank_score"] = rerank_scores
+    reranked = reranked.sort_values("rerank_score", ascending=False).reset_index(drop=True)
+    return reranked

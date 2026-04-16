@@ -6,7 +6,8 @@ import streamlit as st
 
 from src.clustering import fit_gmm, fit_kmeans
 from src.features import FEATURE_COLUMNS_ENCODED, build_feature_matrix, load_dataset
-from src.recommend import RecommendationEngine
+# from src.recommend import RecommendationEngine
+from src.recommend import RecommendationEngine, rerank_feature_auto
 from src.explain import build_comparison_radar, build_single_radar, explain_recommendation
 
 
@@ -57,12 +58,32 @@ selection_mode = st.radio(
 )
 
 if selection_mode == "Search results" and search_results is not None and len(search_results) > 0:
-    selected_index = st.selectbox(
+    search_option_labels = [
+        f"{row['track_name']} - {row['artists']}"
+        for _, row in search_results.iterrows()
+    ]
+
+    selected_search_label = st.selectbox(
         "Pick from search results",
-        options=search_results.index.tolist(),
-        format_func=lambda i: engine.song_label(i),
+        options=search_option_labels,
         key="search_select",
     )
+
+    selected_row = search_results[
+        (search_results["track_name"] + " - " + search_results["artists"]) == selected_search_label
+    ].iloc[0]
+
+    match_df = engine.df[
+        (engine.df["track_name"] == selected_row["track_name"]) &
+        (engine.df["artists"] == selected_row["artists"]) &
+        (engine.df["album_name"] == selected_row["album_name"])
+    ]
+
+    if len(match_df) == 0:
+        st.error("Could not map the selected search result back to the full dataset.")
+        st.stop()
+
+    selected_index = match_df.index[0]
 else:
     song_labels = [engine.song_label(i) for i in range(len(engine.df))]
     selected_index = st.selectbox(
@@ -80,21 +101,29 @@ rec_mode = st.radio(
 )
 
 # --- NEW: Reranking UI (Demo only) ---
-st.subheader("Reranking Strategy (Experimental)")
+# st.subheader("Reranking Strategy (Experimental)")
+
+# rerank_mode = st.radio(
+#     "Reranking",
+#     options=["Default", "Feature-aware (Auto)", "Feature-aware (Manual)"],
+#     horizontal=True,
+# )
+
+# # Manual controls (only show if selected)
+# if rerank_mode == "Feature-aware (Manual)":
+#     st.caption("Adjust feature preferences:")
+
+#     weight_energy = st.slider("Energy importance", 0.0, 2.0, 1.0)
+#     weight_tempo = st.slider("Tempo importance", 0.0, 2.0, 1.0)
+#     weight_acoustic = st.slider("Acousticness importance", 0.0, 2.0, 1.0)
+
+st.subheader("Reranking Strategy")
 
 rerank_mode = st.radio(
     "Reranking",
-    options=["Default", "Feature-aware (Auto)", "Feature-aware (Manual)"],
+    ["Default", "Feature-aware (Auto)"],
     horizontal=True,
 )
-
-# Manual controls (only show if selected)
-if rerank_mode == "Feature-aware (Manual)":
-    st.caption("Adjust feature preferences:")
-
-    weight_energy = st.slider("Energy importance", 0.0, 2.0, 1.0)
-    weight_tempo = st.slider("Tempo importance", 0.0, 2.0, 1.0)
-    weight_acoustic = st.slider("Acousticness importance", 0.0, 2.0, 1.0)
 
 top_k = st.slider("Number of recommendations", min_value=3, max_value=20, value=10)
 
@@ -134,6 +163,11 @@ if st.button("Recommend", type="primary"):
         recs = engine.recommend_by_gmm(selected_index, gmm_result.probabilities, top_k=top_k)
         feature_comp = None
         st.info("Recommending by GMM posterior similarity")
+
+    if rerank_mode == "Feature-aware (Auto)":
+        recs = rerank_feature_auto(engine, recs, selected_index)
+        st.info("Feature-aware auto reranking is applied.")
+
 
     st.subheader(f"Top {len(recs)} Recommendations")
     if rerank_mode != "Default":
