@@ -129,7 +129,7 @@ class RecommendationEngine:
         similarities = 1 - distances
 
         result = self.df.iloc[indices][
-            ["track_name", "artists", "track_genre", "popularity"]
+            ["track_id", "track_name", "artists", "album_name", "track_genre", "popularity"]
         ].copy()
         result["similarity"] = similarities
         result = result.reset_index(drop=True)
@@ -158,7 +158,7 @@ class RecommendationEngine:
         similarities = 1 - distances
 
         recs = self.df.iloc[indices][
-            ["track_name", "artists", "track_genre", "popularity"]
+            ["track_id", "track_name", "artists", "album_name", "track_genre", "popularity"]
         ].copy()
         recs["similarity"] = similarities
         recs = recs.reset_index(drop=True)
@@ -166,12 +166,14 @@ class RecommendationEngine:
         # Build feature comparison
         query_features = self.df.iloc[song_index][FEATURE_COLUMNS_ENCODED].to_dict()
         query_features["track_name"] = self.df.iloc[song_index]["track_name"]
+        query_features["artists"] = self.df.iloc[song_index]["artists"]
         query_features["role"] = "Query"
 
         rows = [query_features]
         for idx in indices:
             row = self.df.iloc[idx][FEATURE_COLUMNS_ENCODED].to_dict()
             row["track_name"] = self.df.iloc[idx]["track_name"]
+            row["artists"] = self.df.iloc[idx]["artists"]
             row["role"] = "Recommended"
             rows.append(row)
 
@@ -224,7 +226,7 @@ class RecommendationEngine:
         top_sims = similarities[ranked]
 
         result = self.df.iloc[top_indices][
-            ["track_name", "artists", "track_genre", "popularity"]
+            ["track_id", "track_name", "artists", "album_name", "track_genre", "popularity"]
         ].copy()
         result["similarity"] = top_sims
         result = result.reset_index(drop=True)
@@ -257,7 +259,7 @@ class RecommendationEngine:
         top_sims = similarities[ranked]
 
         result = self.df.iloc[ranked][
-            ["track_name", "artists", "track_genre", "popularity"]
+            ["track_id", "track_name", "artists", "album_name", "track_genre", "popularity"]
         ].copy()
         result["similarity"] = top_sims
         result = result.reset_index(drop=True)
