@@ -30,6 +30,24 @@ uv run streamlit run app/app.py
 
 The app loads from `data/processed/clean_dataset_final.csv`.
 
+### Spotify API Setup (Optional)
+
+To enable album art, metadata enrichment, and direct playback in song cards, set up Spotify Developer credentials:
+
+1. **Create a Spotify Developer account** at https://developer.spotify.com/dashboard
+2. **Create a new app** and accept the terms
+3. **Copy your credentials**:
+   - `Client ID`
+   - `Client Secret`
+4. **Create `.streamlit/secrets.toml`** in the project root:
+   ```toml
+   SPOTIFY_CLIENT_ID = "your_client_id_here"
+   SPOTIFY_CLIENT_SECRET = "your_client_secret_here"
+   ```
+5. **Restart the Streamlit app** — credentials will load automatically
+
+> **Note**: The app works without Spotify credentials (graceful fallback), but album covers and embedded playback won't display.
+
 ## Recent Updates
 
 - Added Spotify-powered song cards with album art, richer metadata, and direct playback controls.

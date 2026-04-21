@@ -189,16 +189,6 @@ with st.sidebar:
     st.subheader("Spotify Player")
     if st.session_state["active_spotify_embed_url"]:
         st.caption(st.session_state["active_spotify_label"])
-        meta = st.session_state.get("active_spotify_meta")
-        if isinstance(meta, dict):
-            cover_url = meta.get("album_cover_url", "")
-            st.caption(
-                f"{meta.get('album_name', 'Unknown Album')} | "
-                f"{meta.get('track_genre', 'Unknown Genre')} | "
-                f"Popularity {meta.get('popularity', 'N/A')}"
-            )
-            if cover_url:
-                st.image(cover_url, width=240)
         st.components.v1.iframe(
             st.session_state["active_spotify_embed_url"],
             height=380,
