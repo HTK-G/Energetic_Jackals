@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import numpy as np
-from custom_kmeans import CustomKMeans
+from src.custom_kmeans import CustomKMeans
 from sklearn.metrics import silhouette_score
 from sklearn.mixture import GaussianMixture
 
