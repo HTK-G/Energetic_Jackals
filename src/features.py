@@ -8,7 +8,12 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 
-DATA_PATH = Path(__file__).resolve().parents[1] / "data" / "processed" / "clean_dataset_final.csv"
+DATA_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "data"
+    / "processed"
+    / "clean_dataset_final.csv"
+)
 
 AUDIO_FEATURES = [
     "danceability",
@@ -50,16 +55,22 @@ def load_dataset(path: str | Path | None = None) -> pd.DataFrame:
 
 
 def encode_key_cyclical(df: pd.DataFrame) -> pd.DataFrame:
-    """Replace the integer `key` column (0-11) with sine/cosine encoding."""
+    """Replace the integer `key` column (0-11) with sine/cosine encoding.
+
+    Coerces invalid/missing keys to NaN to avoid crashes downstream.
+    """
     out = df.copy()
-    radians = 2 * np.pi * out["key"] / 12
+    key_numeric = pd.to_numeric(out["key"], errors="coerce")
+    radians = 2 * np.pi * key_numeric / 12
     out["key_sin"] = np.sin(radians)
     out["key_cos"] = np.cos(radians)
     out = out.drop(columns=["key"])
     return out
 
 
-def build_feature_matrix(df: pd.DataFrame) -> tuple[np.ndarray, StandardScaler, pd.DataFrame]:
+def build_feature_matrix(
+    df: pd.DataFrame,
+) -> tuple[np.ndarray, StandardScaler, pd.DataFrame]:
     """Build a standardized 12D feature matrix from the raw dataset.
 
     Returns:

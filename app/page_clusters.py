@@ -206,7 +206,7 @@ with tab_viz:
     else:
         fig = _scatter_plot(umap_2d, cluster_result.labels, df_encoded, f"{algorithm} Clusters (UMAP)", "UMAP")
 
-    st.plotly_chart(fig, use_container_width=True, key="cluster_scatter")
+    st.plotly_chart(fig, width="stretch", key="cluster_scatter")
 
     # Distribution bar chart
     dist = pd.Series(cluster_result.labels).value_counts().sort_index().reset_index()
@@ -214,7 +214,7 @@ with tab_viz:
     dist["cluster"] = dist["cluster"].astype(str)
     dist_fig = px.bar(dist, x="cluster", y="count", color="cluster", title="Cluster Size Distribution")
     dist_fig.update_layout(showlegend=False, margin={"l": 20, "r": 20, "t": 50, "b": 20})
-    st.plotly_chart(dist_fig, use_container_width=True, key="cluster_dist")
+    st.plotly_chart(dist_fig, width="stretch", key="cluster_dist")
 
 # ── Tab 2: Tuning ────────────────────────────────────────────────────────────
 
@@ -228,15 +228,15 @@ with tab_tuning:
 
         with col1:
             sil_fig = _tuning_elbow_chart(tuning, "Silhouette Score", tuning.silhouette_scores)
-            st.plotly_chart(sil_fig, use_container_width=True, key="tuning_sil")
+            st.plotly_chart(sil_fig, width="stretch", key="tuning_sil")
 
         with col2:
             if algorithm == "K-Means" and tuning.inertias:
                 inertia_fig = _tuning_elbow_chart(tuning, "Inertia (Elbow)", tuning.inertias, lower_is_better=True)
-                st.plotly_chart(inertia_fig, use_container_width=True, key="tuning_inertia")
+                st.plotly_chart(inertia_fig, width="stretch", key="tuning_inertia")
             elif algorithm == "GMM" and tuning.bics:
                 bic_fig = _tuning_elbow_chart(tuning, "BIC", tuning.bics, lower_is_better=True)
-                st.plotly_chart(bic_fig, use_container_width=True, key="tuning_bic")
+                st.plotly_chart(bic_fig, width="stretch", key="tuning_bic")
 
         st.success(f"Recommended K = {tuning.best_k}")
 
@@ -262,7 +262,7 @@ with tab_profile:
             "Label": auto_labels[cid],
             "Top Genres": genres_str,
         })
-    st.dataframe(pd.DataFrame(summary_rows), use_container_width=True)
+    st.dataframe(pd.DataFrame(summary_rows), width="stretch")
 
     # Feature heatmap
     display_cols = {c: DISPLAY_NAMES.get(c, c) for c in means_df.columns}
@@ -277,7 +277,7 @@ with tab_profile:
         labels={"x": "Cluster", "y": "Feature"},
     )
     heatmap_fig.update_layout(margin={"l": 20, "r": 20, "t": 50, "b": 20})
-    st.plotly_chart(heatmap_fig, use_container_width=True, key="feature_heatmap")
+    st.plotly_chart(heatmap_fig, width="stretch", key="feature_heatmap")
 
     # Inspect individual cluster
     selected_cluster = st.selectbox(
@@ -293,7 +293,7 @@ with tab_profile:
     cluster_songs = df_encoded[cluster_result.labels == selected_cluster].copy()
     cluster_songs = cluster_songs.sort_values("popularity", ascending=False)
     visible = [c for c in ["track_name", "artists", "track_genre", "popularity", "energy", "valence", "danceability"] if c in cluster_songs.columns]
-    st.dataframe(cluster_songs[visible].head(30).reset_index(drop=True), use_container_width=True)
+    st.dataframe(cluster_songs[visible].head(30).reset_index(drop=True), width="stretch")
 
 # ── Tab 4: Metrics ────────────────────────────────────────────────────────────
 
@@ -311,7 +311,7 @@ with tab_metrics:
 
     all_metrics = _evaluate_both(feature_matrix, df_encoded["track_genre"], k_value)
     comparison_df = metrics_comparison_table(all_metrics)
-    st.dataframe(comparison_df, use_container_width=True)
+    st.dataframe(comparison_df, width="stretch")
 
     st.caption(
         "**Note**: Genre labels are imperfect ground truth. Low ARI/NMI does not necessarily mean bad clusters "

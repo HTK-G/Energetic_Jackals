@@ -23,7 +23,6 @@ env/
 
 # ── Jupyter ───────────────────────────────────────────────────────────────────
 .ipynb_checkpoints/
-*.ipynb_checkpoints
 
 # ── ML artefacts ──────────────────────────────────────────────────────────────
 # Trained model weights — store in model registry, not git
@@ -49,5 +48,5 @@ Thumbs.db
 *.swo
 
 # ── Misc ──────────────────────────────────────────────────────────────────────
-.env
+.streamlit/secrets.toml
 *.log

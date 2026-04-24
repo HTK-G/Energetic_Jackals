@@ -152,7 +152,7 @@ def metrics_comparison_table(metrics_list: list[ClusterMetrics]) -> pd.DataFrame
             "Silhouette": round(m.silhouette, 4),
             "Davies-Bouldin": round(m.davies_bouldin, 4),
             "Calinski-Harabasz": round(m.calinski_harabasz, 1),
-            "ARI": round(m.ari, 4) if m.ari is not None else "N/A",
-            "NMI": round(m.nmi, 4) if m.nmi is not None else "N/A",
+            "ARI": round(m.ari, 4) if m.ari is not None else np.nan,
+            "NMI": round(m.nmi, 4) if m.nmi is not None else np.nan,
         })
     return pd.DataFrame(rows)

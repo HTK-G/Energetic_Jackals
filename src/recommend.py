@@ -14,7 +14,9 @@ from src.features import FEATURE_COLUMNS_ENCODED
 class RecommendationEngine:
     """Song-to-song recommendation using cosine similarity in feature space."""
 
-    def __init__(self, df: pd.DataFrame, feature_matrix: np.ndarray, k_neighbors: int = 100) -> None:
+    def __init__(
+        self, df: pd.DataFrame, feature_matrix: np.ndarray, k_neighbors: int = 100
+    ) -> None:
         self.df = df.reset_index(drop=True)
         self.feature_matrix = feature_matrix
         self.k_neighbors = min(k_neighbors, len(df) - 1)
@@ -44,7 +46,9 @@ class RecommendationEngine:
         """Search songs with simple ranking: title prefix > title contains > artist contains > fuzzy fallback."""
         normalized_query = query.strip().lower()
         if not normalized_query:
-            return self.df.head(limit)[["track_name", "artists", "album_name", "track_genre", "popularity"]].copy()
+            return self.df.head(limit)[
+                ["track_name", "artists", "album_name", "track_genre", "popularity"]
+            ].copy()
 
         df = self.df.copy()
 
@@ -61,26 +65,42 @@ class RecommendationEngine:
         artist_matches = df[artist_lower.str.contains(normalized_query, na=False)]
 
         # combine in priority order, remove duplicates
-        combined = pd.concat([prefix_matches, contains_matches, artist_matches]).drop_duplicates()
+        combined = pd.concat(
+            [prefix_matches, contains_matches, artist_matches]
+        ).drop_duplicates()
 
         # if enough results, return top ones directly
         if len(combined) >= limit:
-            result = combined.head(limit)[["track_name", "artists", "album_name", "track_genre", "popularity"]].copy()
+            result = combined.head(limit)[
+                ["track_name", "artists", "album_name", "track_genre", "popularity"]
+            ].copy()
             return result.reset_index(drop=True)
 
         # 4. fuzzy fallback for remaining slots
-        labels = (df["track_name"] + " - " + df["artists"]).tolist()
+        # Fill NaNs to avoid producing non-string candidates.
+        labels = (
+            df["track_name"].fillna("") + " - " + df["artists"].fillna("")
+        ).tolist()
         matches = process.extract(query, labels, scorer=fuzz.WRatio, limit=limit * 2)
         fuzzy_indices = [m[2] for m in matches if m[1] >= 60]
 
         fuzzy_df = df.iloc[fuzzy_indices]
         final = pd.concat([combined, fuzzy_df]).drop_duplicates().head(limit)
 
-        result = final[["track_name", "artists", "album_name", "track_genre", "popularity"]].copy()
+        result = final[
+            ["track_name", "artists", "album_name", "track_genre", "popularity"]
+        ].copy()
         return result.reset_index(drop=True)
+#  HEAD
     
-    # 1 playlist
-    def _filter_same_name(self, song_index: int, indices: np.ndarray, distances: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+#     # 1 playlist
+#     def _filter_same_name(self, song_index: int, indices: np.ndarray, distances: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+# 
+
+    def _filter_same_name(
+        self, song_index: int, indices: np.ndarray, distances: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+#  origin/master
         """Remove songs with the same track_name as the query (duplicate versions)."""
         query_name = self.df.iloc[song_index]["track_name"]
         keep = []
@@ -134,7 +154,10 @@ class RecommendationEngine:
 
         similarities = 1 - distances
 
-        result = self.df.iloc[indices][["track_name", "artists", "track_genre", "popularity"]].copy()
+        # result = self.df.iloc[indices][["track_name", "artists", "track_genre", "popularity"]].copy()
+        result = self.df.iloc[indices][
+            ["track_id", "track_name", "artists", "album_name", "track_genre", "popularity"]
+        ].copy()
         result["similarity"] = similarities
         result = result.reset_index(drop=True)
         return result
@@ -142,7 +165,9 @@ class RecommendationEngine:
     def recommend(self, song_index: int, top_k: int = 10) -> pd.DataFrame:
         """Return top-K most similar songs (excluding same-name duplicates)."""
         query_vector = self.feature_matrix[song_index].reshape(1, -1)
-        distances, indices = self.nn.kneighbors(query_vector, n_neighbors=self.k_neighbors)
+        distances, indices = self.nn.kneighbors(
+            query_vector, n_neighbors=self.k_neighbors
+        )
 
         distances = distances.flatten()
         indices = indices.flatten()
@@ -159,15 +184,21 @@ class RecommendationEngine:
         distances = distances[:top_k]
         similarities = 1 - distances
 
-        result = self.df.iloc[indices][["track_name", "artists", "track_genre", "popularity"]].copy()
+        result = self.df.iloc[indices][
+            ["track_id", "track_name", "artists", "album_name", "track_genre", "popularity"]
+        ].copy()
         result["similarity"] = similarities
         result = result.reset_index(drop=True)
         return result
 
-    def recommend_with_features(self, song_index: int, top_k: int = 10) -> tuple[pd.DataFrame, pd.DataFrame]:
+    def recommend_with_features(
+        self, song_index: int, top_k: int = 10
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Return recommendations along with a feature comparison DataFrame."""
         query_vector = self.feature_matrix[song_index].reshape(1, -1)
-        distances, indices = self.nn.kneighbors(query_vector, n_neighbors=self.k_neighbors)
+        distances, indices = self.nn.kneighbors(
+            query_vector, n_neighbors=self.k_neighbors
+        )
 
         distances = distances.flatten()
         indices = indices.flatten()
@@ -182,19 +213,23 @@ class RecommendationEngine:
         distances = distances[:top_k]
         similarities = 1 - distances
 
-        recs = self.df.iloc[indices][["track_name", "artists", "track_genre", "popularity"]].copy()
+        recs = self.df.iloc[indices][
+            ["track_id", "track_name", "artists", "album_name", "track_genre", "popularity"]
+        ].copy()
         recs["similarity"] = similarities
         recs = recs.reset_index(drop=True)
 
         # Build feature comparison
         query_features = self.df.iloc[song_index][FEATURE_COLUMNS_ENCODED].to_dict()
         query_features["track_name"] = self.df.iloc[song_index]["track_name"]
+        query_features["artists"] = self.df.iloc[song_index]["artists"]
         query_features["role"] = "Query"
 
         rows = [query_features]
         for idx in indices:
             row = self.df.iloc[idx][FEATURE_COLUMNS_ENCODED].to_dict()
             row["track_name"] = self.df.iloc[idx]["track_name"]
+            row["artists"] = self.df.iloc[idx]["artists"]
             row["role"] = "Recommended"
             rows.append(row)
 
@@ -220,7 +255,11 @@ class RecommendationEngine:
         # Filter same-name duplicates
         query_name = self.df.iloc[song_index]["track_name"]
         candidate_indices = np.array(
-            [i for i in candidate_indices if self.df.iloc[i]["track_name"] != query_name],
+            [
+                i
+                for i in candidate_indices
+                if self.df.iloc[i]["track_name"] != query_name
+            ],
             dtype=int,
         )
 
@@ -242,7 +281,9 @@ class RecommendationEngine:
         top_indices = candidate_indices[ranked]
         top_sims = similarities[ranked]
 
-        result = self.df.iloc[top_indices][["track_name", "artists", "track_genre", "popularity"]].copy()
+        result = self.df.iloc[top_indices][
+            ["track_id", "track_name", "artists", "album_name", "track_genre", "popularity"]
+        ].copy()
         result["similarity"] = top_sims
         result = result.reset_index(drop=True)
         return result
@@ -273,7 +314,9 @@ class RecommendationEngine:
         ranked = np.argsort(similarities)[::-1][:top_k]
         top_sims = similarities[ranked]
 
-        result = self.df.iloc[ranked][["track_name", "artists", "track_genre", "popularity"]].copy()
+        result = self.df.iloc[ranked][
+            ["track_id", "track_name", "artists", "album_name", "track_genre", "popularity"]
+        ].copy()
         result["similarity"] = top_sims
         result = result.reset_index(drop=True)
         return result
