@@ -8,10 +8,21 @@ import pandas as pd
 import streamlit as st
 from urllib import error, parse, request
 
-from src.clustering import fit_gmm, fit_kmeans
-from src.features import FEATURE_COLUMNS_ENCODED, build_feature_matrix, load_dataset
+from pathlib import Path
+
+import joblib
+
+from src.features import FEATURE_COLUMNS_ENCODED
 from src.recommend import RecommendationEngine
 from src.explain import build_comparison_radar, build_single_radar, explain_recommendation
+
+
+ARTIFACTS_DIR = Path(__file__).resolve().parents[1] / "artifacts"
+RECOMMEND_ARTIFACTS = [
+    "feature_matrix.joblib",
+    "kmeans_best.joblib",
+    "gmm_full_best.joblib",
+]
 
 
 FALLBACK_COVER_URL = "https://tenor.com/view/jenminismo-gif-24558731"
@@ -156,23 +167,26 @@ def _attach_spotify_fields(recs: pd.DataFrame) -> pd.DataFrame:
 
 
 @st.cache_resource
-def _build_engine():
-    """Load data, build features, and create the recommendation engine."""
-    df = load_dataset()
-    feature_matrix, scaler, df_encoded = build_feature_matrix(df)
+def _load_artifacts():
+    """Load precomputed feature matrix and clustering artifacts."""
+    missing = [n for n in RECOMMEND_ARTIFACTS if not (ARTIFACTS_DIR / n).exists()]
+    if missing:
+        st.error(
+            "Precomputed artifacts not found: "
+            + ", ".join(missing)
+            + "\n\nRun `uv run python -m scripts.precompute` once to generate them."
+        )
+        st.stop()
+    feats = joblib.load(ARTIFACTS_DIR / "feature_matrix.joblib")
+    df_encoded = feats["df_encoded"]
+    feature_matrix = feats["feature_matrix"]
     engine = RecommendationEngine(df_encoded, feature_matrix)
-    return engine, df_encoded, feature_matrix
+    km_result = joblib.load(ARTIFACTS_DIR / "kmeans_best.joblib")
+    gmm_result = joblib.load(ARTIFACTS_DIR / "gmm_full_best.joblib")
+    return engine, df_encoded, feature_matrix, km_result, gmm_result
 
 
-@st.cache_resource
-def _fit_clusters(_feature_matrix, k: int):
-    """Cache clustering results."""
-    km = fit_kmeans(_feature_matrix, n_clusters=k)
-    gmm = fit_gmm(_feature_matrix, n_clusters=k)
-    return km, gmm
-
-
-engine, df_encoded, feature_matrix = _build_engine()
+engine, df_encoded, feature_matrix, km_result, gmm_result = _load_artifacts()
 
 if "active_spotify_embed_url" not in st.session_state:
     st.session_state["active_spotify_embed_url"] = None
@@ -337,7 +351,8 @@ if rerank_mode == "Feature-aware (Manual)":
 top_k = st.slider("Number of recommendations", min_value=3, max_value=20, value=10)
 
 if rec_mode in ("K-Means cluster", "GMM posterior"):
-    cluster_k = st.slider("Number of clusters (K)", min_value=5, max_value=30, value=10, key="rec_cluster_k")
+    _k_used = km_result.n_clusters if rec_mode == "K-Means cluster" else gmm_result.n_clusters
+    st.caption(f"Using precomputed model with K={_k_used}.")
 
 if st.button("Recommend", type="primary"):
     # Get recommendations based on mode
@@ -345,12 +360,10 @@ if st.button("Recommend", type="primary"):
     if rec_mode == "Embedding (KNN)":
         recs, feature_comp = engine.recommend_with_features(selected_index, top_k=top_k)
     elif rec_mode == "K-Means cluster":
-        km_result, _ = _fit_clusters(feature_matrix, cluster_k)
         recs = engine.recommend_by_cluster(selected_index, km_result.labels, top_k=top_k)
         feature_comp = None
         cluster_message = f"Recommending within K-Means cluster {int(km_result.labels[selected_index])}"
     else:  # GMM posterior
-        _, gmm_result = _fit_clusters(feature_matrix, cluster_k)
         recs = engine.recommend_by_gmm(selected_index, gmm_result.probabilities, top_k=top_k)
         feature_comp = None
         cluster_message = "Recommending by GMM posterior similarity"

@@ -22,13 +22,35 @@ Requires Python >= 3.11 and [uv](https://docs.astral.sh/uv/).
 uv sync
 ```
 
+## Precompute Artifacts (one-time)
+
+All heavy training (K-Means tuning, GMM tuning with full + diag covariance,
+final fits, PCA projection, evaluation metrics) runs **offline** and is
+persisted to `artifacts/`. The Streamlit app only loads pickles, so startup
+drops from tens of minutes to a few seconds.
+
+```bash
+uv run python -m scripts.precompute
+```
+
+This takes ~10–20 minutes the first time. Re-run with `--force` if the dataset
+changes:
+
+```bash
+uv run python -m scripts.precompute --force
+```
+
+The `artifacts/` directory is gitignored — each developer regenerates it locally.
+
 ## Run the App
 
 ```bash
 uv run streamlit run app/app.py
 ```
 
-The app loads from `data/processed/clean_dataset_final.csv`.
+The app loads from `data/processed/clean_dataset_final.csv` and from
+`artifacts/`. If artifacts are missing, the app prints a clear error pointing
+back to `scripts.precompute`.
 
 ### Spotify API Setup (Optional)
 
@@ -75,8 +97,11 @@ The 11 audio features are transformed into a 12D standardized vector:
 Energetic_Jackals/
 ├── app/
 │   ├── app.py                  # Streamlit multi-page entry point
-│   ├── page_recommend.py       # Song search & recommendation page
-│   └── page_clusters.py        # Cluster explorer page
+│   ├── page_recommend.py       # Song search & recommendation page (loads artifacts)
+│   └── page_clusters.py        # Cluster explorer page (loads artifacts)
+├── scripts/
+│   └── precompute.py           # Offline training: tuning, final fits, PCA, metrics
+├── artifacts/                  # Pickled outputs of precompute (gitignored)
 ├── data/
 │   └── processed/
 │       └── clean_dataset_final.csv
@@ -86,10 +111,11 @@ Energetic_Jackals/
 │   ├── features.py             # Feature engineering, encoding, scaling
 │   ├── recommend.py            # KNN + cluster-aware recommendation engine
 │   ├── clustering.py           # K-Means and GMM with hyperparameter tuning
+│   ├── custom_kmeans.py        # From-scratch NumPy K-Means (course requirement)
 │   ├── evaluate.py             # Genre hit rate, internal/external cluster metrics
 │   └── explain.py              # Feature comparison, radar charts, explanations
 ├── PLAN.md                     # Full implementation plan (Phases 1–4)
-├── CHANGELOG.md                # Track of all changes
+├── PRECOMPUTE_PLAN.md          # Performance optimization plan
 ├── CLAUDE.md                   # Claude Code guidance
 ├── pyproject.toml
 └── requirements.txt
@@ -112,7 +138,8 @@ Energetic_Jackals/
 | Language                 | Python 3.11+                                             |
 | Data processing          | pandas, numpy                                            |
 | ML / Clustering          | scikit-learn (KMeans, GaussianMixture, NearestNeighbors) |
-| Dimensionality reduction | scikit-learn (PCA), umap-learn (UMAP)                    |
+| Dimensionality reduction | scikit-learn (PCA)                                       |
+| Persistence              | joblib (precomputed artifacts)                           |
 | Visualization            | plotly (interactive Streamlit charts)                    |
 | String matching          | rapidfuzz                                                |
 | Web app                  | Streamlit                                                |
