@@ -12,6 +12,10 @@ st.set_page_config(
 
 recommend_page = st.Page("page_recommend.py", title="Song Search & Recommend", icon="\U0001F3B5", default=True)
 clusters_page = st.Page("page_clusters.py", title="Cluster Explorer", icon="\U0001F4CA")
+playlist_page = st.Page("page_playlist.py", title="Playlist-Based Recommendation", icon="🎧")
 
-pg = st.navigation([recommend_page, clusters_page])
+# pg = st.navigation([recommend_page, clusters_page])
+pg = st.navigation([recommend_page, playlist_page, clusters_page])
 pg.run()
+
+
