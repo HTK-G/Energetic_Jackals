@@ -22,7 +22,8 @@ from src.evaluate import evaluate_clustering
 from src.features import build_feature_matrix, load_dataset
 
 ARTIFACTS_DIR = Path(__file__).resolve().parents[1] / "artifacts"
-K_RANGE = range(5, 31)
+KMEANS_K_RANGE = range(5, 31)
+GMM_K_RANGE = range(5, 51)
 
 
 def _step(label: str, path: Path, force: bool, fn: Callable):
@@ -64,10 +65,10 @@ def main() -> None:
     )
 
     tuning_kmeans = _step(
-        "Tune K-Means (sklearn, K in [5, 30])",
+        f"Tune K-Means (sklearn, K in [{KMEANS_K_RANGE.start}, {KMEANS_K_RANGE.stop - 1}])",
         ARTIFACTS_DIR / "tuning_kmeans.joblib",
         args.force,
-        lambda: tune_kmeans(feature_matrix, k_range=K_RANGE),
+        lambda: tune_kmeans(feature_matrix, k_range=KMEANS_K_RANGE),
     )
 
     kmeans_best = _step(
@@ -78,17 +79,17 @@ def main() -> None:
     )
 
     tuning_gmm_full = _step(
-        "Tune GMM (full covariance)",
+        f"Tune GMM (full covariance, K in [{GMM_K_RANGE.start}, {GMM_K_RANGE.stop - 1}])",
         ARTIFACTS_DIR / "tuning_gmm_full.joblib",
         args.force,
-        lambda: tune_gmm(feature_matrix, k_range=K_RANGE, covariance_type="full"),
+        lambda: tune_gmm(feature_matrix, k_range=GMM_K_RANGE, covariance_type="full"),
     )
 
     tuning_gmm_diag = _step(
-        "Tune GMM (diagonal covariance)",
+        f"Tune GMM (diagonal covariance, K in [{GMM_K_RANGE.start}, {GMM_K_RANGE.stop - 1}])",
         ARTIFACTS_DIR / "tuning_gmm_diag.joblib",
         args.force,
-        lambda: tune_gmm(feature_matrix, k_range=K_RANGE, covariance_type="diag"),
+        lambda: tune_gmm(feature_matrix, k_range=GMM_K_RANGE, covariance_type="diag"),
     )
 
     gmm_full_best = _step(

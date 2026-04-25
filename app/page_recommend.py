@@ -13,7 +13,7 @@ from pathlib import Path
 import joblib
 
 from src.features import FEATURE_COLUMNS_ENCODED
-from src.recommend import RecommendationEngine
+from src.recommend import RecommendationEngine, rerank_feature_auto
 from src.explain import build_comparison_radar, build_single_radar, explain_recommendation
 
 
@@ -25,7 +25,7 @@ RECOMMEND_ARTIFACTS = [
 ]
 
 
-FALLBACK_COVER_URL = "https://tenor.com/view/jenminismo-gif-24558731"
+FALLBACK_COVER_URL = "https://placehold.co/300x300?text=No+Cover"
 
 
 def _normalize_track_id(value: object) -> str | None:
@@ -224,6 +224,35 @@ search_query = st.text_input(
     key="seed_search",
 )
 
+#  HEAD
+# if selection_mode == "Search results" and search_results is not None and len(search_results) > 0:
+#     search_option_labels = [
+#         f"{row['track_name']} - {row['artists']}"
+#         for _, row in search_results.iterrows()
+#     ]
+
+#     selected_search_label = st.selectbox(
+#         "Pick from search results",
+#         options=search_option_labels,
+#         key="search_select",
+#     )
+
+#     selected_row = search_results[
+#         (search_results["track_name"] + " - " + search_results["artists"]) == selected_search_label
+#     ].iloc[0]
+
+#     match_df = engine.df[
+#         (engine.df["track_name"] == selected_row["track_name"]) &
+#         (engine.df["artists"] == selected_row["artists"]) &
+#         (engine.df["album_name"] == selected_row["album_name"])
+#     ]
+
+#     if len(match_df) == 0:
+#         st.error("Could not map the selected search result back to the full dataset.")
+#         st.stop()
+
+#     selected_index = match_df.index[0]
+# 
 selected_index = st.session_state["selected_seed_index"]
 
 if search_query.strip():
@@ -277,7 +306,12 @@ if search_query.strip():
             with st.container(border=True):
                 seed_left, seed_right = st.columns([1, 3])
                 with seed_left:
-                    st.image(selected_cover_url if selected_cover_url else FALLBACK_COVER_URL, width=140)
+                    # st.image(selected_cover_url if selected_cover_url else FALLBACK_COVER_URL, width=140)
+                    if selected_cover_url:
+                        st.image(selected_cover_url, width=140)
+                    else:
+                        st.caption("No album cover available")
+
                 with seed_right:
                     st.markdown(f"**{selected_row['track_name']}**")
                     st.write(
@@ -316,6 +350,7 @@ if search_query.strip():
                 st.rerun()
 
             st.session_state["selected_seed_index"] = int(selected_index)
+#  origin/master
 else:
     st.info("👉 Start by searching for a song or artist to select it as your seed song.")
     st.session_state["selected_seed_index"] = None
@@ -331,22 +366,16 @@ rec_mode = st.radio(
     horizontal=True,
 )
 
-# --- NEW: Reranking UI (Demo only) ---
-st.subheader("Reranking Strategy (Experimental)")
+st.subheader("Reranking Strategy")
 
 rerank_mode = st.radio(
     "Reranking",
-    options=["Default", "Feature-aware (Auto)", "Feature-aware (Manual)"],
+    ["Default", "Feature-aware"],
     horizontal=True,
 )
 
-# Manual controls (only show if selected)
-if rerank_mode == "Feature-aware (Manual)":
-    st.caption("Adjust feature preferences:")
-
-    weight_energy = st.slider("Energy importance", 0.0, 2.0, 1.0)
-    weight_tempo = st.slider("Tempo importance", 0.0, 2.0, 1.0)
-    weight_acoustic = st.slider("Acousticness importance", 0.0, 2.0, 1.0)
+# if payload["rerank_mode"] != "Default":
+#     st.info("Feature-aware reranking adjusts recommendations based on audio feature similarity.")
 
 top_k = st.slider("Number of recommendations", min_value=3, max_value=20, value=10)
 
@@ -438,6 +467,11 @@ if payload is not None:
     if payload["cluster_message"]:
         st.info(payload["cluster_message"])
 
+    if payload["rerank_mode"] == "Feature-aware":
+        recs = rerank_feature_auto(engine, recs, selected_index)
+        st.info("Feature-aware auto reranking is applied.")
+
+
     st.subheader(f"Top {len(recs)} Recommendations")
     if payload["rerank_mode"] != "Default":
         st.info("Reranking is applied (demo version). This shows how results can be adjusted based on audio features.")
@@ -488,6 +522,16 @@ if payload is not None:
                 if release_date:
                     st.caption(f"Release Date: {release_date}")
 
+#  HEAD
+#             radar_fig = build_comparison_radar(
+#                 feature_comp[feature_comp["role"] == "Query"].iloc[0],
+#                 rec_feature_row,
+#                 df_encoded,
+#                 query_name=query_row["track_name"],
+#                 rec_name=rec_name,
+#             )
+#             st.plotly_chart(radar_fig, use_container_width=True, key=f"compare_radar_{i}")
+# 
             action_col1, action_col2 = st.columns([1, 2])
             if action_col1.button(
                 "▶ Play",
@@ -526,3 +570,4 @@ if payload is not None:
                         rec_name=rec_name,
                     )
                     st.plotly_chart(radar_fig, width="stretch", key=f"compare_radar_{i}")
+#  origin/master
