@@ -5,8 +5,8 @@
 > | Batch | Status | Commit | Notes |
 > |---|---|---|---|
 > | Step 0 — merge master, extend GMM K range, rerun precompute | ✅ Done | `ab4a1f0` | GMM full best K=44 (interior), GMM diag best K=49 (still near upper bound, accepted) |
-> | Batch 1 — recommend_from_playlist + new app.py + drop page_playlist | ✅ Done | _this commit_ | `recommend_from_playlist` arrived from master merge (no work). App.py registers 4 pages, journey + evaluation are stubs ("Coming soon") |
-> | Batch 2 — derive_scenario_mappings.py | ⏳ Next | | |
+> | Batch 1 — recommend_from_playlist + new app.py + drop page_playlist | ✅ Done | `2843e81` | `recommend_from_playlist` arrived from master merge (no work). App.py registers 4 pages, journey + evaluation are stubs ("Coming soon") |
+> | Batch 2 — derive_scenario_mappings.py | ✅ Done | _this commit_ | 6 scenarios derived from 113 genres. p25/p75 over matched songs. Note: `workout` keyword itself unmatched — fell back to electro/dance/hip-hop, n=4,919. `wind down` and `rainy night` may need start↔end swap in Batch 4 |
 > | Batch 3 — src/journey.py + src/visualization.py | ⏳ Pending | | |
 > | Batch 4 — app/page_journey.py | ⏳ Pending | | Replaces stub; absorbs old playlist functionality |
 > | Batch 5 — scripts/evaluate_recommendations.py + app/page_evaluation.py | ⏳ Pending | | Replaces stub |
