@@ -91,16 +91,10 @@ class RecommendationEngine:
             ["track_name", "artists", "album_name", "track_genre", "popularity"]
         ].copy()
         return result.reset_index(drop=True)
-#  HEAD
-    
-#     # 1 playlist
-#     def _filter_same_name(self, song_index: int, indices: np.ndarray, distances: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-# 
 
     def _filter_same_name(
         self, song_index: int, indices: np.ndarray, distances: np.ndarray
     ) -> tuple[np.ndarray, np.ndarray]:
-#  origin/master
         """Remove songs with the same track_name as the query (duplicate versions)."""
         query_name = self.df.iloc[song_index]["track_name"]
         keep = []

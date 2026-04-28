@@ -96,13 +96,20 @@ def compute_internal_metrics(
     feature_matrix: np.ndarray,
     labels: np.ndarray,
 ) -> dict[str, float]:
-    """Compute Silhouette, Davies-Bouldin, and Calinski-Harabasz scores."""
+    """Compute Silhouette, Davies-Bouldin, and Calinski-Harabasz scores.
+
+    Silhouette uses sample_size=5000 because it has O(n^2) complexity and the
+    full 89K computation is too slow. davies_bouldin and calinski_harabasz are
+    O(n) and use the full dataset.
+    """
     n_unique = len(np.unique(labels))
     if n_unique < 2 or n_unique >= len(feature_matrix):
         return {"silhouette": 0.0, "davies_bouldin": float("inf"), "calinski_harabasz": 0.0}
 
     return {
-        "silhouette": float(silhouette_score(feature_matrix, labels)),
+        "silhouette": float(silhouette_score(
+            feature_matrix, labels, sample_size=5000, random_state=42
+        )),
         "davies_bouldin": float(davies_bouldin_score(feature_matrix, labels)),
         "calinski_harabasz": float(calinski_harabasz_score(feature_matrix, labels)),
     }

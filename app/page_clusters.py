@@ -1,60 +1,57 @@
-"""Phase 2: Cluster visualization, profiling, and evaluation page."""
+"""Phase 2: Cluster visualization, profiling, and evaluation page.
+
+All training is precomputed offline by `scripts/precompute.py`. This page only
+loads pickled artifacts.
+"""
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import joblib
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-from sklearn.decomposition import PCA
-from umap import UMAP
 
-from src.clustering import (
-    ClusterResult,
-    TuningResult,
-    fit_gmm,
-    fit_kmeans,
-    tune_gmm,
-    tune_kmeans,
-)
-from src.evaluate import ClusterMetrics, evaluate_clustering, metrics_comparison_table
+from src.clustering import ClusterResult, TuningResult
+from src.evaluate import ClusterMetrics, metrics_comparison_table
 from src.explain import DISPLAY_NAMES
-from src.features import FEATURE_COLUMNS_ENCODED, build_feature_matrix, load_dataset
+from src.features import FEATURE_COLUMNS_ENCODED
 
 
-# ── Data loading (cached) ───────────────────────────────────────────────────
-
-
-@st.cache_resource
-def _load_data():
-    df = load_dataset()
-    feature_matrix, scaler, df_encoded = build_feature_matrix(df)
-    return df_encoded, feature_matrix
-
-
-@st.cache_resource
-def _compute_projections(_feature_matrix: np.ndarray):
-    pca_2d = PCA(n_components=2, random_state=42).fit_transform(_feature_matrix)
-    umap_2d = UMAP(n_components=2, random_state=42, n_neighbors=30, min_dist=0.3).fit_transform(_feature_matrix)
-    return pca_2d, umap_2d
+ARTIFACTS_DIR = Path(__file__).resolve().parents[1] / "artifacts"
+REQUIRED_ARTIFACTS = [
+    "feature_matrix.joblib",
+    "pca_2d.joblib",
+    "tuning_kmeans.joblib",
+    "tuning_gmm_full.joblib",
+    "tuning_gmm_diag.joblib",
+    "kmeans_best.joblib",
+    "gmm_full_best.joblib",
+    "gmm_diag_best.joblib",
+    "metrics_comparison.joblib",
+]
 
 
 @st.cache_resource
-def _tune_kmeans(_feature_matrix: np.ndarray):
-    return tune_kmeans(_feature_matrix, k_range=range(5, 31))
-
-
-@st.cache_resource
-def _tune_gmm(_feature_matrix: np.ndarray):
-    return tune_gmm(_feature_matrix, k_range=range(5, 31))
+def _load_artifacts() -> dict:
+    missing = [name for name in REQUIRED_ARTIFACTS if not (ARTIFACTS_DIR / name).exists()]
+    if missing:
+        st.error(
+            "Precomputed artifacts not found: "
+            + ", ".join(missing)
+            + "\n\nRun `uv run python -m scripts.precompute` once to generate them."
+        )
+        st.stop()
+    return {name.removesuffix(".joblib"): joblib.load(ARTIFACTS_DIR / name) for name in REQUIRED_ARTIFACTS}
 
 
 # ── Cluster profiling helpers ────────────────────────────────────────────────
 
 
 def _cluster_feature_means(df: pd.DataFrame, labels: np.ndarray) -> pd.DataFrame:
-    """Mean feature values per cluster."""
     df_work = df.copy()
     df_work["cluster"] = labels
     feature_cols = [c for c in FEATURE_COLUMNS_ENCODED if c in df_work.columns]
@@ -62,7 +59,6 @@ def _cluster_feature_means(df: pd.DataFrame, labels: np.ndarray) -> pd.DataFrame
 
 
 def _cluster_top_genres(df: pd.DataFrame, labels: np.ndarray, top_n: int = 5) -> dict[int, list[tuple[str, int]]]:
-    """Top genres per cluster by frequency."""
     df_work = df.copy()
     df_work["cluster"] = labels
     result = {}
@@ -73,7 +69,6 @@ def _cluster_top_genres(df: pd.DataFrame, labels: np.ndarray, top_n: int = 5) ->
 
 
 def _auto_label_cluster(mean_row: pd.Series) -> str:
-    """Generate a short human-readable label from dominant features."""
     labels = []
 
     if mean_row.get("energy", 0) > 0.7 and mean_row.get("danceability", 0) > 0.7:
@@ -133,7 +128,7 @@ def _scatter_plot(
     return fig
 
 
-def _tuning_elbow_chart(tuning: TuningResult, metric_name: str, values: list[float], lower_is_better: bool = False) -> go.Figure:
+def _tuning_elbow_chart(tuning: TuningResult, metric_name: str, values: list[float]) -> go.Figure:
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=tuning.k_range, y=values, mode="lines+markers", name=metric_name,
@@ -150,45 +145,48 @@ def _tuning_elbow_chart(tuning: TuningResult, metric_name: str, values: list[flo
 # ── Page layout ──────────────────────────────────────────────────────────────
 
 
-df_encoded, feature_matrix = _load_data()
+artifacts = _load_artifacts()
+df_encoded: pd.DataFrame = artifacts["feature_matrix"]["df_encoded"]
+feature_matrix: np.ndarray = artifacts["feature_matrix"]["feature_matrix"]
+pca_2d: np.ndarray = artifacts["pca_2d"]
+
+ALGO_OPTIONS = {
+    "K-Means (CustomKMeans)": {
+        "result_key": "kmeans_best",
+        "tuning_key": "tuning_kmeans",
+        "tuning_secondary": ("Inertia (Elbow)", "inertias"),
+        "tuning_label": "silhouette",
+    },
+    "GMM (full covariance)": {
+        "result_key": "gmm_full_best",
+        "tuning_key": "tuning_gmm_full",
+        "tuning_secondary": ("BIC", "bics"),
+        "tuning_label": "BIC",
+    },
+    "GMM (diag covariance)": {
+        "result_key": "gmm_diag_best",
+        "tuning_key": "tuning_gmm_diag",
+        "tuning_secondary": ("BIC", "bics"),
+        "tuning_label": "BIC",
+    },
+}
+
 
 st.title("Cluster Explorer")
-st.caption("K-Means and GMM clustering on the 12D standardized feature space")
+st.caption("K-Means and GMM clustering on the 12D standardized feature space (precomputed)")
 
-# --- Sidebar controls ---
 with st.sidebar:
     st.header("Clustering Controls")
-    algorithm = st.selectbox("Algorithm", ["K-Means", "GMM"])
-    auto_k = st.checkbox("Auto-select best K", value=True)
+    algorithm = st.selectbox("Algorithm", list(ALGO_OPTIONS.keys()))
 
-    if auto_k:
-        with st.spinner("Tuning hyperparameters (this may take a moment)..."):
-            if algorithm == "K-Means":
-                tuning = _tune_kmeans(feature_matrix)
-            else:
-                tuning = _tune_gmm(feature_matrix)
-        k_value = tuning.best_k
-        st.info(f"Best K = {k_value} (by {'silhouette' if algorithm == 'K-Means' else 'BIC'})")
-    else:
-        tuning = None
-        k_value = st.slider("Number of clusters (K)", min_value=5, max_value=30, value=10)
+algo_cfg = ALGO_OPTIONS[algorithm]
+cluster_result: ClusterResult = artifacts[algo_cfg["result_key"]]
+tuning: TuningResult = artifacts[algo_cfg["tuning_key"]]
+k_value = cluster_result.n_clusters
 
-# --- Fit the selected model ---
-with st.spinner(f"Fitting {algorithm} with K={k_value}..."):
-    if algorithm == "K-Means":
-        cluster_result = fit_kmeans(feature_matrix, n_clusters=k_value)
-    else:
-        cluster_result = fit_gmm(feature_matrix, n_clusters=k_value)
+with st.sidebar:
+    st.info(f"Best K = {k_value} (selected by {algo_cfg['tuning_label']})")
 
-    metrics = evaluate_clustering(
-        algorithm=cluster_result.algorithm,
-        n_clusters=cluster_result.n_clusters,
-        feature_matrix=feature_matrix,
-        labels=cluster_result.labels,
-        genre_labels=df_encoded["track_genre"],
-    )
-
-# --- Tabs ---
 tab_viz, tab_tuning, tab_profile, tab_metrics = st.tabs(
     ["Cluster Visualization", "Hyperparameter Tuning", "Cluster Profiling", "Evaluation Metrics"]
 )
@@ -196,19 +194,9 @@ tab_viz, tab_tuning, tab_profile, tab_metrics = st.tabs(
 # ── Tab 1: Visualization ─────────────────────────────────────────────────────
 
 with tab_viz:
-    with st.spinner("Computing projections..."):
-        pca_2d, umap_2d = _compute_projections(feature_matrix)
-
-    proj_method = st.radio("Projection method", ["PCA", "UMAP"], horizontal=True, key="proj_method")
-
-    if proj_method == "PCA":
-        fig = _scatter_plot(pca_2d, cluster_result.labels, df_encoded, f"{algorithm} Clusters (PCA)", "PCA")
-    else:
-        fig = _scatter_plot(umap_2d, cluster_result.labels, df_encoded, f"{algorithm} Clusters (UMAP)", "UMAP")
-
+    fig = _scatter_plot(pca_2d, cluster_result.labels, df_encoded, f"{algorithm} Clusters (PCA)", "PCA")
     st.plotly_chart(fig, width="stretch", key="cluster_scatter")
 
-    # Distribution bar chart
     dist = pd.Series(cluster_result.labels).value_counts().sort_index().reset_index()
     dist.columns = ["cluster", "count"]
     dist["cluster"] = dist["cluster"].astype(str)
@@ -221,24 +209,22 @@ with tab_viz:
 with tab_tuning:
     st.subheader(f"{algorithm} Hyperparameter Tuning")
 
-    if tuning is None:
-        st.info("Enable 'Auto-select best K' in the sidebar to see tuning charts.")
-    else:
-        col1, col2 = st.columns(2)
-
-        with col1:
+    col1, col2 = st.columns(2)
+    with col1:
+        if tuning.silhouette_scores:
             sil_fig = _tuning_elbow_chart(tuning, "Silhouette Score", tuning.silhouette_scores)
             st.plotly_chart(sil_fig, width="stretch", key="tuning_sil")
+        else:
+            st.caption("Silhouette not computed for GMM tuning (BIC is the principled criterion).")
 
-        with col2:
-            if algorithm == "K-Means" and tuning.inertias:
-                inertia_fig = _tuning_elbow_chart(tuning, "Inertia (Elbow)", tuning.inertias, lower_is_better=True)
-                st.plotly_chart(inertia_fig, width="stretch", key="tuning_inertia")
-            elif algorithm == "GMM" and tuning.bics:
-                bic_fig = _tuning_elbow_chart(tuning, "BIC", tuning.bics, lower_is_better=True)
-                st.plotly_chart(bic_fig, width="stretch", key="tuning_bic")
+    with col2:
+        sec_label, sec_attr = algo_cfg["tuning_secondary"]
+        sec_values = getattr(tuning, sec_attr)
+        if sec_values:
+            sec_fig = _tuning_elbow_chart(tuning, sec_label, sec_values)
+            st.plotly_chart(sec_fig, width="stretch", key="tuning_secondary")
 
-        st.success(f"Recommended K = {tuning.best_k}")
+    st.success(f"Recommended K = {tuning.best_k}")
 
 # ── Tab 3: Profiling ─────────────────────────────────────────────────────────
 
@@ -248,10 +234,8 @@ with tab_profile:
     means_df = _cluster_feature_means(df_encoded, cluster_result.labels)
     top_genres = _cluster_top_genres(df_encoded, cluster_result.labels)
 
-    # Auto labels
     auto_labels = {cid: _auto_label_cluster(means_df.loc[cid]) for cid in means_df.index}
 
-    # Summary table
     summary_rows = []
     for cid in sorted(means_df.index):
         count = int((cluster_result.labels == cid).sum())
@@ -264,7 +248,6 @@ with tab_profile:
         })
     st.dataframe(pd.DataFrame(summary_rows), width="stretch")
 
-    # Feature heatmap
     display_cols = {c: DISPLAY_NAMES.get(c, c) for c in means_df.columns}
     means_display = means_df.rename(columns=display_cols)
 
@@ -279,7 +262,6 @@ with tab_profile:
     heatmap_fig.update_layout(margin={"l": 20, "r": 20, "t": 50, "b": 20})
     st.plotly_chart(heatmap_fig, width="stretch", key="feature_heatmap")
 
-    # Inspect individual cluster
     selected_cluster = st.selectbox(
         "Inspect cluster",
         options=sorted(int(c) for c in np.unique(cluster_result.labels)),
@@ -300,16 +282,7 @@ with tab_profile:
 with tab_metrics:
     st.subheader("Cluster Evaluation Metrics")
 
-    # Run both algorithms for comparison
-    @st.cache_resource
-    def _evaluate_both(_feature_matrix, _genre_labels, k):
-        km_result = fit_kmeans(_feature_matrix, n_clusters=k)
-        km_metrics = evaluate_clustering("K-Means", k, _feature_matrix, km_result.labels, _genre_labels)
-        gmm_result = fit_gmm(_feature_matrix, n_clusters=k)
-        gmm_metrics = evaluate_clustering("GMM", k, _feature_matrix, gmm_result.labels, _genre_labels)
-        return [km_metrics, gmm_metrics]
-
-    all_metrics = _evaluate_both(feature_matrix, df_encoded["track_genre"], k_value)
+    all_metrics: list[ClusterMetrics] = artifacts["metrics_comparison"]
     comparison_df = metrics_comparison_table(all_metrics)
     st.dataframe(comparison_df, width="stretch")
 
@@ -318,7 +291,6 @@ with tab_metrics:
         "— it may mean clustering captured acoustic structure that genre labels don't reflect."
     )
 
-    # Metric explanations
     with st.expander("Metric definitions"):
         st.markdown("""
 - **Silhouette Score** [-1, 1]: Measures intra-cluster cohesion vs. inter-cluster separation. Higher is better.

@@ -31,6 +31,9 @@ env/
 *.ckpt
 *.safetensors
 
+# Precomputed Streamlit-app artifacts (regenerate via `python -m scripts.precompute`)
+artifacts/
+
 # Processed data (large files) — raw CSVs are also excluded by default
 data/processed/*
 !data/processed/clean_dataset_final.csv

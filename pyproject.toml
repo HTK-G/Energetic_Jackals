@@ -9,13 +9,13 @@ description = "Spotify audio feature analysis, clustering, and recommendation sy
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "joblib>=1.3",
     "matplotlib>=3.9",
     "numpy>=2.1",
     "pandas>=2.2",
     "plotly>=5.24",
     "rapidfuzz>=3.9",
     "scikit-learn>=1.6",
-    "umap-learn>=0.5",
     "seaborn>=0.13",
     "streamlit>=1.43",
 ]
