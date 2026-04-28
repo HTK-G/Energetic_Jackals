@@ -1,22 +1,137 @@
 # Implementation Plan v2.1 — 最终修订版
 
-> **Live progress tracker** (updated as batches land)
->
-> | Batch | Status | Commit | Notes |
-> |---|---|---|---|
-> | Step 0 — merge master, extend GMM K range, rerun precompute | ✅ Done | `ab4a1f0` | GMM full best K=44 (interior), GMM diag best K=49 (still near upper bound, accepted) |
-> | Batch 1 — recommend_from_playlist + new app.py + drop page_playlist | ✅ Done | `2843e81` | `recommend_from_playlist` arrived from master merge (no work). App.py registers 4 pages, journey + evaluation are stubs ("Coming soon") |
-> | Batch 2 — derive_scenario_mappings.py | ✅ Done | _this commit_ | 6 scenarios derived from 113 genres. p25/p75 over matched songs. Note: `workout` keyword itself unmatched — fell back to electro/dance/hip-hop, n=4,919. `wind down` and `rainy night` may need start↔end swap in Batch 4 |
-> | Batch 3 — src/journey.py + src/visualization.py | ⏳ Pending | | |
-> | Batch 4 — app/page_journey.py | ⏳ Pending | | Replaces stub; absorbs old playlist functionality |
-> | Batch 5 — scripts/evaluate_recommendations.py + app/page_evaluation.py | ⏳ Pending | | Replaces stub |
-> | Batch 6 — page_clusters.py overlap heatmap + pyproject + README + .gitignore | ⏳ Pending | | |
->
-> **Decisions locked in for execution:**
-> - Trajectory feature scale: raw 4D, energy/valence/danceability as-is (already [0,1]), tempo clipped to [50,200] BPM then `(tempo-50)/150` to map onto [0,1].
-> - GMM tuning K range: K-Means stays [5,30], GMM full + diag at [5,50]. Best K post-rerun: full=44, diag=49.
-> - `recommend_from_playlist` is provided by master's `src/recommend.py` — no new method needed in `recommend.py`.
-> - Reranking from master is preserved in `page_recommend.py`.
+> **Document purpose.** This file is the persistent memory for the Plan v2 work.
+> Every decision, file change, artifact, and open question is recorded here.
+> Reading just the top of this file from cold should be enough to resume work
+> without re-deriving any context. Sections after §0 are the original plan and
+> are kept for reference only.
+
+---
+
+## STATUS SNAPSHOT — 2026-04-27
+
+### Where we are
+
+- **Branch:** `my-changes` — local matches `fork/my-changes`; **not** merged to `origin/master` yet.
+- **Last commit pushed:** `06ba85f` (Batch 2).
+- **Uncommitted local change:** one trivial fix in `PLAN_v2.md` (a placeholder `_this commit_` was replaced with `06ba85f` after the commit landed). Will be folded into the next commit.
+- **Currently in:** end of Batch 2, about to start **Batch 3**. Two design questions are awaiting user answer before any code is written.
+- **No background processes running.**
+
+### Progress tracker
+
+| # | Step / Batch | Status | Commit | Outcome |
+|---|---|---|---|---|
+| 0 | Merge `origin/master` → `my-changes`, extend GMM K range, rerun precompute | ✅ Done | `ab4a1f0` | One conflict in `app/page_recommend.py` (resolved by combining precompute imports with master's reranking). Stale `#  HEAD`/`#  origin/master` markers cleaned in `src/recommend.py`. GMM K range extended to [5,50]. All 9 precompute artifacts present. New best K: K-Means=11, GMM full=44 (interior), GMM diag=49 (one off upper bound, accepted) |
+| 1 | `recommend_from_playlist` + new `app.py` + drop `page_playlist.py` | ✅ Done | `2843e81` | `recommend_from_playlist` was provided by master merge — smoke-tested, no new code needed. `app/app.py` now registers 4 pages: Recommend → Journey → Clusters → Evaluation. `page_journey.py` and `page_evaluation.py` are stubs with "Coming soon" content. `page_playlist.py` deleted |
+| 2 | `scripts/derive_scenario_mappings.py` + run | ✅ Done | `06ba85f` | 6 scenarios derived from p25/p50/p75 percentiles over matched songs. Output `artifacts/scenario_mappings.joblib`. See "Scenario mapping outcomes" below |
+| 3 | `src/journey.py` + `src/visualization.py` | ⏳ **NEXT** (awaiting answers to Q-3a + Q-3b below) | | Trajectory generation, target song selection, radio mode, Russell-space plotting |
+| 4 | `app/page_journey.py` | ⏳ Pending | | Replaces the Batch 1 stub. Will absorb the deleted `page_playlist.py` functionality as a "playlist aggregation" custom mode |
+| 5 | `scripts/evaluate_recommendations.py` + run + `app/page_evaluation.py` | ⏳ Pending | | Replaces the Batch 1 stub. Output `artifacts/recommendation_eval.joblib` |
+| 6 | `page_clusters.py` overlap heatmap + `pyproject.toml` + `README.md` + `.gitignore` polish | ⏳ Pending | | Final polish, PR-ready state |
+
+### Decisions locked in (do NOT relitigate)
+
+- **Trajectory feature scale:** raw 4D, all in [0,1].
+  - `energy`, `valence`, `danceability` — used as-is (already [0,1] in dataset).
+  - `tempo_norm` — clip to [50, 200] BPM then `(tempo - 50) / 150`.
+  - Order in numpy arrays: `[energy, valence, danceability, tempo_norm]`.
+- **GMM tuning K range:** K-Means stays `range(5, 31)`; GMM full + diag use `range(5, 51)`. Best K post-rerun: K-Means=11, GMM full=44, GMM diag=49.
+- **`recommend_from_playlist`:** comes from master's `src/recommend.py:122` (averages `feature_matrix[seed_indices]`, runs `nn.kneighbors`, filters seeds + same-name). Smoke-tested with seeds `[100, 200, 300]` → returned 5 songs with similarities 0.95–0.98. No new code needed.
+- **Reranking from master is preserved** in `app/page_recommend.py`. Imports `rerank_feature_auto` from `src/recommend.py`. UI section "Reranking Strategy" and the application block (`if payload["rerank_mode"] == "Feature-aware": recs = rerank_feature_auto(...)`) are both kept verbatim from master.
+- **`FALLBACK_COVER_URL`** = `https://placehold.co/300x300?text=No+Cover` (master's version, replacing the tenor.com GIF from pre-merge `my-changes`).
+- **Scenario mapping = semi-data-driven:** scenario→keyword lists are hand-picked, but the resulting feature vectors come from real percentiles over the matched songs. Output dict format:
+  ```python
+  {scenario_name: {
+      "start": np.array(4), "centroid": np.array(4), "end": np.array(4),
+      "source_genres": [keywords],          # what we asked for
+      "matched_genres": [actual genres],    # what we found
+      "n_songs": int,
+  }}
+  ```
+- **Stub pages (`page_journey.py`, `page_evaluation.py`)** intentionally exist with "Coming soon" content from Batch 1 onwards so the Streamlit app keeps booting cleanly; Batches 4 and 5 replace their content.
+- **GMM diag at K=49 (one off upper boundary) is accepted**, not extended further. Beyond K=50 the model loses interpretability. The full=44 vs diag=49 contrast is itself a useful finding for the report.
+- **`umap-learn` dep is gone** from `pyproject.toml` and `uv.lock` (removed during the original precompute commit). No imports remain anywhere. Batch 6 only needs to verify, not remove.
+
+### Scenario mapping outcomes (Batch 2 result)
+
+Catalog: 89,578 songs across 113 genres. Trajectory features in column order: `[energy, valence, danceability, tempo_norm]`.
+
+| Scenario | n_songs | start | end | Notes |
+|---|---|---|---|---|
+| workout | 4,919 | 0.59, 0.36, 0.61, 0.32 | 0.81, 0.72, 0.79, 0.55 | Keyword `"workout"` itself unmatched in dataset; fell back to electro/dance/hip-hop. Adding `"edm"` to keywords would add more songs (low-priority deferred — see D-2) |
+| focus | 3,654 | 0.09, 0.13, 0.34, 0.23 | 0.45, 0.48, 0.64, 0.57 | Matched classical/piano/study/ambient. Range is naturally narrow |
+| wind down | 3,358 | 0.21, 0.11, 0.33, 0.24 | 0.58, 0.49, 0.66, 0.57 | **D-1**: name implies descending energy but p25→p75 ascends. Decide direction handling in Batch 4 |
+| party | 11,476 | 0.52, 0.36, 0.53, 0.34 | 0.83, 0.74, 0.72, 0.59 | Overlaps commute on "pop"/"dance" |
+| commute | 12,775 | 0.48, 0.34, 0.46, 0.33 | 0.84, 0.72, 0.65, 0.62 | Overlaps party |
+| rainy night | 2,514 | 0.33, 0.35, 0.49, 0.30 | 0.66, 0.75, 0.72, 0.58 | **D-1**: name implies stable melancholy but p25→p75 ascends. Decide direction handling in Batch 4 |
+
+### Open questions (must answer before Batch 3 code is written)
+
+| # | Question | My recommendation |
+|---|---|---|
+| Q-3a | `select_song_at_target` `popularity_weight` default. With features in [0,1] (4D), L2 distance ∈ [0, 2]. With `popularity_weight=0.1` (plan default) and popularity normalized to [0,1], popularity contributes at most 0.1 — barely moves the ranking. Bump default to ~0.5? | Bump to 0.5; expose a slider in Batch 4 so users can adjust |
+| Q-3b | Selection efficiency: naive O(N_targets × 89k) per playlist (~50ms with numpy) vs KD-tree | Naive — fast enough, simpler code, allows arbitrary scoring (popularity / artist penalty / etc.) without rebuilding the tree |
+
+### Deferred decisions / known issues (revisit later — non-blocking)
+
+| # | Where | Issue |
+|---|---|---|
+| D-1 | Batch 4 | `wind down` and `rainy night` scenarios may need `start ↔ end` swap or a per-scenario `direction: ascending|descending|flat` field. Currently both go ascending |
+| D-2 | Batch 2 / 4 | `"workout"` keyword unmatched in dataset. Adding `"edm"` would help. Current 4,919-song match is sufficient — defer |
+| D-3 | Batch 6 | `rerank_feature_auto` (in `src/recommend.py`) does O(n) string scan to find each rec's catalog index. Cheap fix using indices already in the recs DataFrame. Polish in Batch 6 |
+| D-4 | Closed | Conflict markers `#  HEAD`/`#  origin/master` removed from `src/recommend.py` in Step 0. Verified clean elsewhere |
+
+### Current file inventory
+
+| File | State | Created/Modified by |
+|---|---|---|
+| `app/app.py` | Modified | Step 0 (auto-merge), Batch 1 (4-page registration) |
+| `app/page_recommend.py` | Modified | Step 0 (merge: precompute load + reranking) |
+| `app/page_clusters.py` | Modified | Pre-Plan-v2 precompute commit (`3e644d6`); unchanged in v2 batches so far |
+| `app/page_journey.py` | New (stub) | Batch 1 |
+| `app/page_evaluation.py` | New (stub) | Batch 1 |
+| `app/page_playlist.py` | Deleted | Batch 1 |
+| `src/recommend.py` | Modified | Step 0 (master merge: `recommend_from_playlist` + `_combine_query_vectors` + `rerank_feature_auto` + conflict-marker cleanup) |
+| `src/clustering.py` | Modified | Pre-v2 precompute commit; unchanged in v2 batches |
+| `src/evaluate.py` | Modified | Pre-v2 precompute commit; unchanged in v2 batches |
+| `src/custom_kmeans.py`, `src/explain.py`, `src/features.py` | Unchanged | n/a |
+| `scripts/precompute.py` | Modified | Step 0 (split K_RANGE → KMEANS_K_RANGE + GMM_K_RANGE) |
+| `scripts/derive_scenario_mappings.py` | New | Batch 2 |
+| `scripts/evaluate_recommendations.py` | _Pending — Batch 5_ | |
+| `src/journey.py` | _Pending — Batch 3_ | |
+| `src/visualization.py` | _Pending — Batch 3_ | |
+| `pyproject.toml`, `uv.lock`, `.gitignore`, `README.md` | Unchanged in v2 batches (modified pre-v2) | |
+| `PLAN_v2.md` | Tracked in git | Batch 1 (created), updated each batch |
+
+### Current artifact inventory
+
+All in `artifacts/` (gitignored):
+
+| Artifact | Source script | Used by | Status |
+|---|---|---|---|
+| `feature_matrix.joblib` | `precompute.py` | all pages, all evaluation, scenario derivation | ✅ Present |
+| `pca_2d.joblib` | `precompute.py` | `page_clusters.py` Tab 1 scatter | ✅ Present |
+| `tuning_kmeans.joblib` | `precompute.py` | `page_clusters.py` Tab 2 | ✅ Present (K=[5,30]) |
+| `kmeans_best.joblib` | `precompute.py` | `page_recommend.py` cluster mode, `page_clusters.py`, Batch 5 eval | ✅ Present (K=11) |
+| `tuning_gmm_full.joblib` | `precompute.py` | `page_clusters.py` Tab 2 | ✅ Present (K=[5,50]) |
+| `tuning_gmm_diag.joblib` | `precompute.py` | `page_clusters.py` Tab 2 | ✅ Present (K=[5,50]) |
+| `gmm_full_best.joblib` | `precompute.py` | `page_recommend.py` GMM mode, `page_clusters.py`, Batch 5 eval | ✅ Present (K=44) |
+| `gmm_diag_best.joblib` | `precompute.py` | `page_clusters.py` only (3-way comparison) | ✅ Present (K=49) |
+| `metrics_comparison.joblib` | `precompute.py` | `page_clusters.py` Tab 4 | ✅ Present (3-row metrics) |
+| `scenario_mappings.joblib` | `derive_scenario_mappings.py` | Batch 4 `page_journey.py` | ✅ Present (6 scenarios) |
+| `recommendation_eval.joblib` | `evaluate_recommendations.py` | Batch 5 `page_evaluation.py` | ⏳ Pending Batch 5 |
+
+### How to resume from cold next time
+
+1. Read this snapshot section. Look at the progress tracker to see where we are.
+2. `git log --oneline -5` — confirm last commit matches the tracker.
+3. `git status` — check for the trivial PLAN_v2.md placeholder fix or any other uncommitted state.
+4. `ls artifacts/` — confirm artifacts haven't been blown away.
+5. Read the "Open questions" section. If they're still listed, do not start writing code — ask the user first.
+6. The original plan content (§0 onwards below) shows design intent for the upcoming batch.
+
+---
 
 ## 0. 项目目标 & Beyond Baseline 叙事
 
@@ -31,23 +146,26 @@ Beyond baseline 的四个支柱：
 
 ---
 
-## 1. 当前 Repo 状态 Audit (基于最新代码)
+## 1. 当前 Repo 状态 Audit (原始, 2026-04-25 时的快照)
 
-| 模块 | 状态 | 备注 |
+> ⚠️ **This audit table is stale.** It was the input to Plan v2. For current
+> truth, see the "Current file inventory" table in the snapshot above.
+
+| 模块 | 状态 (原) | 备注 (原) |
 |---|---|---|
 | `app/page_recommend.py` | ✅ 完成 | 三种推荐 mode + Spotify API + load artifacts |
 | `app/page_clusters.py` | ✅ 完成 | 已重构为 load artifacts 版本，无 UMAP |
-| `app/page_playlist.py` | ❌ 未在 fork | 上游 main 有，fork 没拉，且代码有 bug |
-| `app/app.py` | ⚠️ 不完整 | 没注册 playlist page |
+| `app/page_playlist.py` | ❌ 未在 fork | 上游 main 有，fork 没拉，且代码有 bug — _resolved Step 0 + Batch 1: pulled in then deleted_ |
+| `app/app.py` | ⚠️ 不完整 | 没注册 playlist page — _resolved Batch 1: 4 pages registered_ |
 | `src/clustering.py` | ✅ 完成 | tune_kmeans 用 sklearn, fit_kmeans 用 CustomKMeans |
 | `src/custom_kmeans.py` | ✅ 完成 | scratch 实现 |
 | `src/evaluate.py` | ✅ 完成 | 已有 genre_hit_rate |
-| `src/recommend.py` | ⚠️ 缺方法 | 缺 `recommend_from_playlist` |
+| `src/recommend.py` | ⚠️ 缺方法 | 缺 `recommend_from_playlist` — _resolved Step 0: came from master merge_ |
 | `src/explain.py` | ✅ 完成 | radar charts |
 | `src/features.py` | ✅ 完成 | feature engineering |
-| `scripts/precompute.py` | ✅ 完成 | 三个算法 artifacts 已生成 |
-| `pyproject.toml` | ⚠️ 待清理 | umap-learn 依赖需删 |
-| `README.md` | ⚠️ 过时 | 状态表过时, 没提 precompute 流程 |
+| `scripts/precompute.py` | ✅ 完成 | 三个算法 artifacts 已生成 — _GMM K range extended Step 0_ |
+| `pyproject.toml` | ⚠️ 待清理 | umap-learn 依赖需删 — _already removed pre-v2_ |
+| `README.md` | ⚠️ 过时 | 状态表过时, 没提 precompute 流程 — _Batch 6 will rewrite_ |
 
 ---
 
@@ -55,7 +173,7 @@ Beyond baseline 的四个支柱：
 
 ### P0 — Bug 修复 & playlist 整合
 
-**Task 2.1**: `recommend.py` 加 `recommend_from_playlist` 方法
+**Task 2.1** ✅ Done (Step 0 master merge, commit `ab4a1f0`): `recommend.py` 加 `recommend_from_playlist` 方法
 
 逻辑：
 - 输入 `seed_indices: list[int], top_k: int`
@@ -64,13 +182,13 @@ Beyond baseline 的四个支柱：
 - 排除 seed 本身和同名歌
 - 返回 top-K dataframe（同 `recommend()` 的格式）
 
-**Task 2.2**: 砍掉独立的 `page_playlist.py`，整合进 Music Journey
+**Task 2.2** ✅ Done (Batch 1, commit `2843e81`): 砍掉独立的 `page_playlist.py`，整合进 Music Journey
 
 决策（Q5 选 c）：playlist 输入作为 Music Journey 页面的"用 playlist 定义起点"模式。
 具体：在 Music Journey 页面的"自定义模式"里加一个子选项 — 用户可以通过 (a) slider 直接调 feature 值 / (b) 从 playlist 中聚合 feature 值 来定义起点和终点。
 `recommend_from_playlist` 还是要加到 `recommend.py`，因为 Music Journey 内部要复用这个 aggregate 逻辑。
 
-**Task 2.3**: 更新 `app/app.py`
+**Task 2.3** ✅ Done (Batch 1, commit `2843e81`): 更新 `app/app.py`
 
 只注册三个 page：
 
@@ -83,7 +201,7 @@ Beyond baseline 的四个支柱：
 
 ### P1 — Music Journey 新页面（核心 beyond baseline）
 
-**Task 2.4**: 新建 `src/journey.py`
+**Task 2.4** ⏳ Pending (Batch 3): 新建 `src/journey.py`
 
 需要实现的函数：
 
@@ -128,7 +246,7 @@ def radio_next(
     具体：candidate 区间 [center - drift, center + drift]，从中找最近的、未播放的、未同 artist 的歌。"""
 ```
 
-**Task 2.5**: 新建 `src/visualization.py`
+**Task 2.5** ⏳ Pending (Batch 3): 新建 `src/visualization.py`
 
 ```python
 def plot_journey(
@@ -153,7 +271,7 @@ def plot_radio_history(
     """Radio 模式可视化 - 显示已播放歌曲在 Russell 空间里的轨迹（实线连接），加 drift 范围圈。"""
 ```
 
-**Task 2.6**: 新建 `app/page_journey.py`
+**Task 2.6** ⏳ Pending (Batch 4): 新建 `app/page_journey.py` — _stub already in place from Batch 1; will be replaced_
 
 页面结构：
 
@@ -182,7 +300,7 @@ def plot_radio_history(
 - 或者只选一组 → 自动进入 radio 模式
 ```
 
-**Task 2.7**: 6 个预设场景的具体定义
+**Task 2.7** ✅ Done (Batch 2, commit `06ba85f`): 6 个预设场景的具体定义
 
 Q-followup: 场景 mapping 我之前推荐"数据驱动 EDA"但你没明确选。我在这里默认用数据驱动方法，并在 plan 里写明：
 
@@ -196,7 +314,7 @@ Q-followup: 场景 mapping 我之前推荐"数据驱动 EDA"但你没明确选�
 
 ### P1 — Recommendation Evaluation（Phase 4 from PLAN）
 
-**Task 2.8**: 新建 `scripts/evaluate_recommendations.py`
+**Task 2.8** ⏳ Pending (Batch 5): 新建 `scripts/evaluate_recommendations.py`
 
 目的（写在 report 里的核心论述）：
 
@@ -256,7 +374,7 @@ Q-followup: 场景 mapping 我之前推荐"数据驱动 EDA"但你没明确选�
 
 Sample size 500（已确认 Q3）, top_k=10。固定 random_state=42。
 
-**Task 2.9**: 新建 `app/page_evaluation.py`
+**Task 2.9** ⏳ Pending (Batch 5): 新建 `app/page_evaluation.py` — _stub already in place from Batch 1; will be replaced_
 
 布局：
 
@@ -283,7 +401,7 @@ Sample size 500（已确认 Q3）, top_k=10。固定 random_state=42。
 
 ### P2 — Cluster comparison analysis（基本免费）
 
-**Task 2.10**: 在 `page_clusters.py` Tab 4 加深度解读
+**Task 2.10** ⏳ Pending (Batch 6): 在 `page_clusters.py` Tab 4 加深度解读
 
 precompute 已经把三个算法的 metrics 都存好了，需要：
 1. 在已有的对比表下面加一段 markdown 模板（自己填数字）：
@@ -380,12 +498,15 @@ fig = px.imshow(cm, ...)
 
 ---
 
-## 5. Open Questions（这次只剩 2 个，比上次少多了）
+## 5. Open Questions (原始 — both answered before Batches started)
 
-| # | 问题 | 我的 default |
+| # | 问题 | 答案 |
 |---|---|---|
-| Q-A | 场景预设 6 个 (workout/focus/wind down/party/commute/rainy night) 名单 OK 吗？要加/换吗？ | 这 6 个 |
-| Q-B | 场景 mapping 用数据驱动 EDA (`derive_scenario_mappings.py`) 还是我直接给手动 default？ | 数据驱动 |
+| Q-A | 场景预设 6 个 (workout/focus/wind down/party/commute/rainy night) 名单 OK 吗？要加/换吗？ | ✅ Confirmed: these 6, no swaps |
+| Q-B | 场景 mapping 用数据驱动 EDA (`derive_scenario_mappings.py`) 还是我直接给手动 default？ | ✅ Confirmed: 数据驱动 — implemented as Batch 2 |
+
+> Current open questions for the next batch live in the "Open questions" section
+> of the snapshot at the top of this file, not here.
 
 ---
 
