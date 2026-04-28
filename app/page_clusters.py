@@ -174,6 +174,9 @@ ALGO_OPTIONS = {
 
 st.title("Cluster Explorer")
 st.caption("K-Means and GMM clustering on the 12D standardized feature space (precomputed)")
+st.info(
+    "Use this page to inspect how songs group together in feature space, how the algorithms were tuned, and how each cluster is characterized."
+)
 
 with st.sidebar:
     st.header("Clustering Controls")
@@ -194,6 +197,7 @@ tab_viz, tab_tuning, tab_profile, tab_metrics = st.tabs(
 # ── Tab 1: Visualization ─────────────────────────────────────────────────────
 
 with tab_viz:
+    st.caption("The PCA view compresses the 12D feature space into two dimensions so the cluster structure is easier to interpret.")
     fig = _scatter_plot(pca_2d, cluster_result.labels, df_encoded, f"{algorithm} Clusters (PCA)", "PCA")
     st.plotly_chart(fig, width="stretch", key="cluster_scatter")
 
@@ -208,6 +212,7 @@ with tab_viz:
 
 with tab_tuning:
     st.subheader(f"{algorithm} Hyperparameter Tuning")
+    st.caption("These curves show how the chosen K was selected from the offline tuning sweep.")
 
     col1, col2 = st.columns(2)
     with col1:
@@ -230,6 +235,7 @@ with tab_tuning:
 
 with tab_profile:
     st.subheader("Cluster Profiles")
+    st.caption("Each cluster is summarized by its average feature values, the most common genres, and a short auto-generated label.")
 
     means_df = _cluster_feature_means(df_encoded, cluster_result.labels)
     top_genres = _cluster_top_genres(df_encoded, cluster_result.labels)
@@ -281,6 +287,7 @@ with tab_profile:
 
 with tab_metrics:
     st.subheader("Cluster Evaluation Metrics")
+    st.caption("These metrics compare the clustering methods against each other so you can discuss quality in the presentation.")
 
     all_metrics: list[ClusterMetrics] = artifacts["metrics_comparison"]
     comparison_df = metrics_comparison_table(all_metrics)

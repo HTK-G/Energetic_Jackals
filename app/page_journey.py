@@ -11,6 +11,9 @@ import streamlit as st
 
 st.title("Music Journey")
 st.caption("Trajectory playlist + radio mode in Russell emotion space")
+st.info(
+    "This page will turn a mood or starting point into a smoother listening journey, with presets, custom trajectories, and a radio-style mode."
+)
 
 st.info(
     "**Coming soon (Batch 4).**\n\n"

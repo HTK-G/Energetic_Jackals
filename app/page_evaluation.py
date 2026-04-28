@@ -12,6 +12,9 @@ import streamlit as st
 
 st.title("Recommendation Evaluation")
 st.caption("6 methods × 2 metrics comparison")
+st.info(
+    "This page will summarize how well the recommendation methods perform and make it easy to compare them side by side."
+)
 
 st.info(
     "**Coming soon (Batch 5).**\n\n"

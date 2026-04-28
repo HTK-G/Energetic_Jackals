@@ -213,15 +213,19 @@ with st.sidebar:
 
 st.title("Song Search & Recommend")
 st.caption(f"{len(df_encoded):,} songs loaded from Spotify dataset")
+st.info(
+    "Search for a seed song, pick a recommendation mode, and review the ranked tracks with short audio-feature explanations."
+)
 
 # --- Song Search & Selection ---
 st.subheader("Find Your Seed Song")
-st.caption("Search for a song or artist and select it to find similar recommendations.")
+st.caption("Search by song title or artist, then choose the track that will anchor the recommendations.")
 
 search_query = st.text_input(
     "Search for a song or artist",
     placeholder="e.g. Blinding Lights, Drake, Bohemian Rhapsody...",
     key="seed_search",
+    help="Start with a title or artist name. The app will suggest matching songs from the catalog.",
 )
 
 #  HEAD
@@ -360,24 +364,36 @@ if selected_index is None:
     st.stop()
 
 # Recommendation mode
+st.caption(
+    "Embedding (KNN) searches the nearest songs in feature space; cluster modes keep the results within a learned group."
+)
 rec_mode = st.radio(
     "Recommendation mode",
     options=["Embedding (KNN)", "K-Means cluster", "GMM posterior"],
     horizontal=True,
+    help="Choose how the app ranks songs: global similarity, cluster-restricted similarity, or GMM posterior similarity.",
 )
 
 st.subheader("Reranking Strategy")
+st.caption("Default keeps the model ranking; feature-aware reranking nudges results toward closer audio profiles.")
 
 rerank_mode = st.radio(
     "Reranking",
     ["Default", "Feature-aware"],
     horizontal=True,
+    help="Feature-aware reranking slightly adjusts the final order to better match the query song's audio features.",
 )
 
 # if payload["rerank_mode"] != "Default":
 #     st.info("Feature-aware reranking adjusts recommendations based on audio feature similarity.")
 
-top_k = st.slider("Number of recommendations", min_value=3, max_value=20, value=10)
+top_k = st.slider(
+    "Number of recommendations",
+    min_value=3,
+    max_value=20,
+    value=10,
+    help="Controls how many songs appear in the final recommendation list.",
+)
 
 if rec_mode in ("K-Means cluster", "GMM posterior"):
     _k_used = km_result.n_clusters if rec_mode == "K-Means cluster" else gmm_result.n_clusters
@@ -475,6 +491,36 @@ if payload is not None:
     st.subheader(f"Top {len(recs)} Recommendations")
     if payload["rerank_mode"] != "Default":
         st.info("Reranking is applied (demo version). This shows how results can be adjusted based on audio features.")
+    st.caption("Each card shows the similarity score, Spotify link, and a short explanation of how the song compares to the query.")
+
+    export_columns = [
+        column
+        for column in [
+            "track_id",
+            "track_name",
+            "artists",
+            "album_name",
+            "track_genre",
+            "popularity",
+            "similarity",
+            "spotify_url",
+            "spotify_embed_url",
+            "album_cover_url",
+            "spotify_release_date",
+        ]
+        if column in recs.columns
+    ]
+    export_df = recs[export_columns].copy()
+    export_df.insert(0, "recommendation_mode", payload["rec_mode"])
+    export_df.insert(1, "reranking_mode", payload["rerank_mode"])
+
+    st.download_button(
+        "⬇ Download recommendations as CSV",
+        data=export_df.to_csv(index=False).encode("utf-8"),
+        file_name=f"recommendations_seed_{query_row['track_name'].replace(' ', '_').lower()}.csv",
+        mime="text/csv",
+        help="Download the visible recommendation list with song metadata and Spotify links.",
+    )
 
     # Feature comparison (build inline if not from recommend_with_features)
     if feature_comp is None:
