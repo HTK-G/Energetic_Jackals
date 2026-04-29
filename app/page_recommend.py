@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 import numpy as np
 import pandas as pd
@@ -520,40 +521,45 @@ if rec_mode in ("K-Means cluster", "GMM posterior"):
     st.caption(f"Using precomputed model with K={_k_used}.")
 
 if st.button("Recommend", type="primary"):
-    # If MMR is on we ask for an over-fetched candidate pool so MMR has room
-    # to diversify; otherwise we just take the requested top_k directly.
-    use_mmr = (rerank_mode == "MMR (diverse)")
-    fetch_k = max(top_k * 5, 50) if use_mmr else top_k
+    # Magical effect: spinner while computing
+    with st.spinner("✨ Analyzing audio dimensions... 🎵"):
+        # If MMR is on we ask for an over-fetched candidate pool so MMR has room
+        # to diversify; otherwise we just take the requested top_k directly.
+        use_mmr = (rerank_mode == "MMR (diverse)")
+        fetch_k = max(top_k * 5, 50) if use_mmr else top_k
 
-    cluster_message = None
-    feature_comp = None
-    if rec_mode == "Embedding (KNN)":
+        cluster_message = None
+        feature_comp = None
+        if rec_mode == "Embedding (KNN)":
+            if use_mmr:
+                recs = engine.recommend(selected_index, top_k=fetch_k)
+            else:
+                recs, feature_comp = engine.recommend_with_features(selected_index, top_k=top_k)
+        elif rec_mode == "K-Means cluster":
+            recs = engine.recommend_by_cluster(selected_index, km_result.labels, top_k=fetch_k)
+            cluster_message = f"Recommending within K-Means cluster {int(km_result.labels[selected_index])}"
+        else:  # GMM posterior
+            recs = engine.recommend_by_gmm(selected_index, gmm_result.probabilities, top_k=fetch_k)
+            cluster_message = "Recommending by GMM posterior similarity"
+
         if use_mmr:
-            recs = engine.recommend(selected_index, top_k=fetch_k)
-        else:
-            recs, feature_comp = engine.recommend_with_features(selected_index, top_k=top_k)
-    elif rec_mode == "K-Means cluster":
-        recs = engine.recommend_by_cluster(selected_index, km_result.labels, top_k=fetch_k)
-        cluster_message = f"Recommending within K-Means cluster {int(km_result.labels[selected_index])}"
-    else:  # GMM posterior
-        recs = engine.recommend_by_gmm(selected_index, gmm_result.probabilities, top_k=fetch_k)
-        cluster_message = "Recommending by GMM posterior similarity"
+            recs = rerank_mmr(engine, recs, selected_index, lam=float(mmr_lambda), top_k=top_k)
 
-    if use_mmr:
-        recs = rerank_mmr(engine, recs, selected_index, lam=float(mmr_lambda), top_k=top_k)
+        recs = _attach_spotify_fields(recs)
+        recs = _attach_spotify_metadata(recs)
 
-    recs = _attach_spotify_fields(recs)
-    recs = _attach_spotify_metadata(recs)
-
-    st.session_state["recommendation_payload"] = {
-        "selected_index": int(selected_index),
-        "rec_mode": rec_mode,
-        "rerank_mode": rerank_mode,
-        "mmr_lambda": float(mmr_lambda),
-        "cluster_message": cluster_message,
-        "recs": recs,
-        "feature_comp": feature_comp,
-    }
+        st.session_state["recommendation_payload"] = {
+            "selected_index": int(selected_index),
+            "rec_mode": rec_mode,
+            "rerank_mode": rerank_mode,
+            "mmr_lambda": float(mmr_lambda),
+            "cluster_message": cluster_message,
+            "recs": recs,
+            "feature_comp": feature_comp,
+        }
+    
+    # Celebrate the results! 🎉
+    st.balloons()
 
 payload = st.session_state["recommendation_payload"]
 if payload is not None:
@@ -578,33 +584,6 @@ if payload is not None:
         ]
         for label, value in details_rows:
             st.write(f"**{label}:** {value}")
-        
-        # Add Spotify player controls for query song
-        query_track_id = _normalize_track_id(query_row.get("track_id"))
-        query_spotify_available = query_track_id is not None
-        
-        if query_spotify_available:
-            query_spotify_url, query_spotify_embed_url = _build_spotify_urls(query_track_id)
-            st.divider()
-            col_play, col_open = st.columns([1, 2])
-            
-            if col_play.button("Add Query Song to Player", key="play_query_song"):
-                _set_active_player(
-                    query_row["track_name"],
-                    query_row["artists"],
-                    query_spotify_embed_url,
-                )
-                st.session_state["active_spotify_meta"] = {
-                    "album_name": query_row.get("album_name", "Unknown Album"),
-                    "track_genre": query_row.get("track_genre", "Unknown Genre"),
-                    "popularity": int(query_row.get("popularity", 0)),
-                    "album_cover_url": "",
-                }
-                st.rerun()
-            
-            col_open.markdown(f"[🎵 Open in Spotify]({query_spotify_url})")
-        else:
-            st.caption("❌ Spotify ID not available for this song.")
 
     with col_radar:
         fig = build_single_radar(query_row, df_encoded, song_name=query_row["track_name"])
@@ -614,6 +593,45 @@ if payload is not None:
         st.info(payload["cluster_message"])
 
     st.subheader(f"Top {len(recs)} Recommendations")
+    
+    # ✨ Magical animated styles for results
+    st.markdown(
+        """
+        <style>
+        @keyframes aiGlow {
+            0% { box-shadow: 0 0 5px rgba(200, 149, 108, 0.3); }
+            50% { box-shadow: 0 0 20px rgba(200, 149, 108, 0.6), 0 0 40px rgba(74, 222, 128, 0.2); }
+            100% { box-shadow: 0 0 5px rgba(200, 149, 108, 0.3); }
+        }
+        @keyframes slideInLeft {
+            from { opacity: 0; transform: translateX(-20px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+        [data-testid="stContainer"] > [data-testid="stVerticalBlock"]:has([data-testid="stDownloadButton"]) ~ [data-testid="stVerticalBlock"] {
+            animation: slideInLeft 0.6s ease-out;
+        }
+        div[data-testid="stContainer"] {
+            animation: aiGlow 3s ease-in-out infinite;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    
+    # Add export button for recommendations
+    if len(recs) > 0:
+        first_song = recs.iloc[0]["track_name"].replace(" ", "_").replace("/", "_")
+        csv_buffer = io.StringIO()
+        recs.to_csv(csv_buffer, index=False)
+        csv_data = csv_buffer.getvalue()
+        st.download_button(
+            label="📥 Download Recommendations as CSV",
+            data=csv_data,
+            file_name=f"{first_song}_recommendations.csv",
+            mime="text/csv",
+            key="download_recommendations",
+        )
+    
     if payload["rerank_mode"] == "MMR (diverse)":
         st.info(
             f"Reranked with MMR (λ={payload['mmr_lambda']}). "

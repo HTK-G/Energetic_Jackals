@@ -8,6 +8,7 @@ Tab 3: Endless Radio — GMM-cluster roaming with Bayesian belief update
 from __future__ import annotations
 
 import base64
+import io
 import json
 from pathlib import Path
 from urllib import error, parse, request
@@ -259,8 +260,33 @@ with tab_scenario:
         fig = plot_journey(waypoints, playlist, df_encoded, start, end)
         st.plotly_chart(fig, width="stretch", key="scenario_plot")
 
-        # Song list
+        # Export playlist button
         st.subheader("Playlist")
+        # ✨ Magical animated styles
+        st.markdown(
+            """
+            <style>
+            @keyframes aiGlow {
+                0% { box-shadow: 0 0 5px rgba(200, 149, 108, 0.3); }
+                50% { box-shadow: 0 0 20px rgba(200, 149, 108, 0.6), 0 0 40px rgba(74, 222, 128, 0.2); }
+                100% { box-shadow: 0 0 5px rgba(200, 149, 108, 0.3); }
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+        if len(playlist) > 0:
+            first_song = playlist.iloc[0]["track_name"].replace(" ", "_").replace("/", "_")
+            csv_buffer = io.StringIO()
+            playlist.to_csv(csv_buffer, index=False)
+            csv_data = csv_buffer.getvalue()
+            st.download_button(
+                label="📥 Download Playlist as CSV",
+                data=csv_data,
+                file_name=f"{first_song}_recommendations.csv",
+                mime="text/csv",
+                key=f"download_scenario_{selected_scenario}",
+            )
         for idx, (_, row) in enumerate(playlist.iterrows()):
             step = int(row["step"]) + 1
             track_id = _normalize_track_id(row.get("track_id"))
@@ -347,6 +373,31 @@ with tab_custom:
         st.plotly_chart(fig, width="stretch", key="custom_plot")
 
         st.subheader("Playlist")
+        # ✨ Magical animated styles
+        st.markdown(
+            """
+            <style>
+            @keyframes aiGlow {
+                0% { box-shadow: 0 0 5px rgba(200, 149, 108, 0.3); }
+                50% { box-shadow: 0 0 20px rgba(200, 149, 108, 0.6), 0 0 40px rgba(74, 222, 128, 0.2); }
+                100% { box-shadow: 0 0 5px rgba(200, 149, 108, 0.3); }
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+        if len(playlist) > 0:
+            first_song = playlist.iloc[0]["track_name"].replace(" ", "_").replace("/", "_")
+            csv_buffer = io.StringIO()
+            playlist.to_csv(csv_buffer, index=False)
+            csv_data = csv_buffer.getvalue()
+            st.download_button(
+                label="📥 Download Playlist as CSV",
+                data=csv_data,
+                file_name=f"{first_song}_recommendations.csv",
+                mime="text/csv",
+                key=f"download_custom",
+            )
         for idx, (_, row) in enumerate(playlist.iterrows()):
             step = int(row["step"]) + 1
             track_id = _normalize_track_id(row.get("track_id"))
@@ -554,44 +605,59 @@ with tab_endless:
             st.caption(f"Songs played: {len(history)} — press Next Song to see drift.")
 
         if st.button("⏭️ Next Song", type="primary", key="btn_next_song"):
-            seed_str = seed_input.strip()
-            rng = (np.random.default_rng(int(seed_str) + len(history))
-                   if seed_str.isdigit() else np.random.default_rng())
-            last = history[-1]
-            prev_traj = np.array([last["actual_energy"], last["actual_valence"],
-                                  last["actual_danceability"], last["actual_tempo_norm"]])
-            idx, new_belief = gmm_endless_next(
-                belief=st.session_state["endless_belief"],
-                gmm_probs=gmm_result.probabilities,
-                traj_matrix=traj_matrix,
-                prev_traj_features=prev_traj,
-                df=df_encoded,
-                excluded=st.session_state["endless_excluded"],
-                excluded_names=st.session_state["endless_excluded_names"],
-                eta=eta,
-                temperature=temperature,
-                top_k=pool_size,
-                rng=rng,
-            )
-            song = df_encoded.iloc[idx]
-            actual = traj_matrix[idx]
-            st.session_state["endless_belief"] = new_belief
-            st.session_state["endless_excluded"].add(idx)
-            st.session_state["endless_excluded_names"].add(song["track_name"])
-            st.session_state["endless_history"].append({
-                "track_name": song["track_name"],
-                "artists": song["artists"],
-                "track_genre": song["track_genre"],
-                "popularity": int(song["popularity"]),
-                "track_id": _normalize_track_id(song.get("track_id")),
-                "actual_energy": actual[0],
-                "actual_valence": actual[1],
-                "actual_danceability": actual[2],
-                "actual_tempo_norm": actual[3],
-            })
+            with st.spinner("🔮 Predicting next drift in feature space... 🎵"):
+                seed_str = seed_input.strip()
+                rng = (np.random.default_rng(int(seed_str) + len(history))
+                       if seed_str.isdigit() else np.random.default_rng())
+                last = history[-1]
+                prev_traj = np.array([last["actual_energy"], last["actual_valence"],
+                                      last["actual_danceability"], last["actual_tempo_norm"]])
+                idx, new_belief = gmm_endless_next(
+                    belief=st.session_state["endless_belief"],
+                    gmm_probs=gmm_result.probabilities,
+                    traj_matrix=traj_matrix,
+                    prev_traj_features=prev_traj,
+                    df=df_encoded,
+                    excluded=st.session_state["endless_excluded"],
+                    excluded_names=st.session_state["endless_excluded_names"],
+                    eta=eta,
+                    temperature=temperature,
+                    top_k=pool_size,
+                    rng=rng,
+                )
+                song = df_encoded.iloc[idx]
+                actual = traj_matrix[idx]
+                st.session_state["endless_belief"] = new_belief
+                st.session_state["endless_excluded"].add(idx)
+                st.session_state["endless_excluded_names"].add(song["track_name"])
+                st.session_state["endless_history"].append({
+                    "track_name": song["track_name"],
+                    "artists": song["artists"],
+                    "track_genre": song["track_genre"],
+                    "popularity": int(song["popularity"]),
+                    "track_id": _normalize_track_id(song.get("track_id")),
+                    "actual_energy": actual[0],
+                    "actual_valence": actual[1],
+                    "actual_danceability": actual[2],
+                    "actual_tempo_norm": actual[3],
+                })
+            st.balloons()
             st.rerun()
 
         st.subheader("Play History")
+        if len(history) > 0:
+            first_song = history[0]["track_name"].replace(" ", "_").replace("/", "_")
+            csv_buffer = io.StringIO()
+            history_df = pd.DataFrame(history)
+            history_df.to_csv(csv_buffer, index=False)
+            csv_data = csv_buffer.getvalue()
+            st.download_button(
+                label="📥 Download Play History as CSV",
+                data=csv_data,
+                file_name=f"{first_song}_recommendations.csv",
+                mime="text/csv",
+                key=f"download_endless",
+            )
         for i, song in enumerate(reversed(history)):
             num = len(history) - i
             track_id = _normalize_track_id(song.get("track_id"))
