@@ -117,6 +117,31 @@ input[type="text"] {
 </style>
 """, unsafe_allow_html=True)
 
+# ── Initialize session state for persistent Spotify player ──────────────────
+
+if "active_spotify_embed_url" not in st.session_state:
+    st.session_state["active_spotify_embed_url"] = None
+if "active_spotify_label" not in st.session_state:
+    st.session_state["active_spotify_label"] = ""
+if "active_spotify_meta" not in st.session_state:
+    st.session_state["active_spotify_meta"] = None
+
+# ── Render sidebar player on all pages ────────────────────────────────────────
+
+with st.sidebar:
+    st.subheader("Spotify Player")
+    if st.session_state["active_spotify_embed_url"]:
+        st.caption(st.session_state["active_spotify_label"])
+        st.components.v1.iframe(
+            st.session_state["active_spotify_embed_url"],
+            height=380,
+            scrolling=False,
+        )
+    else:
+        st.caption("No song selected yet. Use Play or Add to Player.")
+
+# ── Page navigation ──────────────────────────────────────────────────────────
+
 recommend_page = st.Page("page_recommend.py", title="Song Search & Recommend", icon="\U0001F3B5", default=True)
 journey_page = st.Page("page_journey.py", title="Music Journey", icon="\U0001F3BC")
 model_analysis_page = st.Page("page_model_analysis.py", title="Model Analysis", icon="\U0001F4CA")
