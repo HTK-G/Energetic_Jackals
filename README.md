@@ -12,7 +12,12 @@ A Streamlit web app that recommends songs based on audio feature similarity, wit
   - _Embedding (KNN)_ — Nearest neighbors in the full 12D standardized feature space.
   - _K-Means cluster_ — Restrict recommendations to songs in the same cluster.
   - _GMM posterior_ — Rank songs by cosine similarity of their soft cluster membership vectors.
-- **Cluster Explorer** — Interactive PCA/UMAP scatter plots, hyperparameter tuning charts (elbow, silhouette, BIC), cluster profiling with auto-generated labels and genre breakdowns, evaluation metrics comparison.
+- **Music Journey** — Sequential playlist generation and GMM-cluster roaming:
+  - _Scenario Presets_ — 6 data-driven scenarios (workout, focus, wind down, party, commute, rainy night) with start/end feature vectors derived from genre-matched song percentiles.
+  - _Custom Trajectory_ — User-defined start/end via sliders; greedy sequential nearest-neighbor with composite scoring generates playlists.
+  - _Endless Radio (GMM)_ — GMM-cluster roaming with Bayesian belief update: each song shifts the posterior belief vector, creating a probabilistic drift through feature space.
+  - _Russell Emotion Space_ — 2D energy×valence visualization with trajectory overlays.
+- **Cluster Explorer** — Interactive PCA scatter plots, hyperparameter tuning charts (elbow, silhouette, BIC), cluster profiling with auto-generated labels and genre breakdowns, evaluation metrics comparison.
 
 ## Setup
 
@@ -31,6 +36,7 @@ drops from tens of minutes to a few seconds.
 
 ```bash
 uv run python -m scripts.precompute
+uv run python -m scripts.derive_scenario_mappings
 ```
 
 This takes ~10–20 minutes the first time. Re-run with `--force` if the dataset
@@ -38,6 +44,7 @@ changes:
 
 ```bash
 uv run python -m scripts.precompute --force
+uv run python -m scripts.derive_scenario_mappings
 ```
 
 The `artifacts/` directory is gitignored — each developer regenerates it locally.
@@ -72,9 +79,10 @@ To enable album art, metadata enrichment, and direct playback in song cards, set
 
 ## Recent Updates
 
+- **Music Journey page** with trajectory playlists (greedy sequential NN), GMM-cluster roaming endless radio, and Russell emotion-space visualization.
+- **Dark coffee theme** — elegant dark brown UI with warm caramel accents and Inter font.
 - Added Spotify-powered song cards with album art, richer metadata, and direct playback controls.
 - Integrated search-driven seed selection so users can search and immediately choose the song they want to recommend from.
-- Moved the Spotify player into the sidebar and improved the recommendation card experience with embedded feature comparisons.
 
 ## Dataset
 
@@ -96,12 +104,17 @@ The 11 audio features are transformed into a 12D standardized vector:
 ```
 Energetic_Jackals/
 ├── app/
-│   ├── app.py                  # Streamlit multi-page entry point
-│   ├── page_recommend.py       # Song search & recommendation page (loads artifacts)
-│   └── page_clusters.py        # Cluster explorer page (loads artifacts)
+│   ├── app.py                  # Streamlit multi-page entry point + theme CSS
+│   ├── page_recommend.py       # Song search & recommendation page
+│   ├── page_journey.py         # Music Journey (trajectory + GMM endless radio)
+│   ├── page_clusters.py        # Cluster explorer page
+│   └── page_evaluation.py      # Recommendation evaluation (stub)
 ├── scripts/
-│   └── precompute.py           # Offline training: tuning, final fits, PCA, metrics
+│   ├── precompute.py           # Offline training: tuning, final fits, PCA, metrics
+│   └── derive_scenario_mappings.py  # Data-driven scenario feature vectors
 ├── artifacts/                  # Pickled outputs of precompute (gitignored)
+├── .streamlit/
+│   └── config.toml             # Dark coffee theme
 ├── data/
 │   └── processed/
 │       └── clean_dataset_final.csv
@@ -110,13 +123,14 @@ Energetic_Jackals/
 ├── src/
 │   ├── features.py             # Feature engineering, encoding, scaling
 │   ├── recommend.py            # KNN + cluster-aware recommendation engine
+│   ├── journey.py              # Trajectory generation + GMM-cluster roaming
+│   ├── visualization.py        # Russell emotion-space plots
 │   ├── clustering.py           # K-Means and GMM with hyperparameter tuning
 │   ├── custom_kmeans.py        # From-scratch NumPy K-Means (course requirement)
 │   ├── evaluate.py             # Genre hit rate, internal/external cluster metrics
 │   └── explain.py              # Feature comparison, radar charts, explanations
 ├── PLAN.md                     # Full implementation plan (Phases 1–4)
-├── PRECOMPUTE_PLAN.md          # Performance optimization plan
-├── CLAUDE.md                   # Claude Code guidance
+├── PLAN_v2.md                  # Implementation plan v2 with batch tracking
 ├── pyproject.toml
 └── requirements.txt
 ```
@@ -127,9 +141,9 @@ Energetic_Jackals/
 | ----- | ---------------------------------------------------------------------------------------------------------------- | ------- |
 | 1     | Baseline song-to-song recommendation (KNN, fuzzy search, feature explanations)                                   | Done    |
 | 2     | Clustering analysis — K-Means & GMM (2 of 4 algorithms), evaluation, visualization, cluster-aware recommendation | Done    |
-| 2     | Clustering — DBSCAN & Agglomerative                                                                              | Planned |
-| 3     | Playlist input, mood/scenario recommendation, feature importance                                                 | Planned |
-| 4     | App polish, optional extensions (Spotify API, diversity control, etc.)                                           | Planned |
+| 3     | Music Journey — trajectory playlists, GMM-cluster roaming, Russell emotion-space visualization                    | Done    |
+| 4     | Recommendation evaluation — 6 methods × 2 metrics comparison                                                     | Pending |
+| 5     | App polish, cluster overlap heatmap, optional extensions                                                         | Pending |
 
 ## Technical Stack
 

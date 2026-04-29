@@ -1,7 +1,6 @@
 """KNN-based song recommendation with fuzzy search."""
 
 from __future__ import annotations
-from unittest import result
 
 import numpy as np
 import pandas as pd
@@ -9,6 +8,23 @@ from rapidfuzz import fuzz, process
 from sklearn.neighbors import NearestNeighbors
 
 from src.features import FEATURE_COLUMNS_ENCODED
+
+
+def _dedupe_recs(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop duplicate songs by (track_name, artists), keeping highest popularity.
+
+    The catalog contains the same track on multiple track_ids (re-releases,
+    explicit/clean variants, deluxe albums).  Without this step, a single
+    recommendation list can show the same song two or three times.
+    """
+    if df.empty:
+        return df
+    return (
+        df.sort_values("popularity", ascending=False, kind="stable")
+          .drop_duplicates(subset=["track_name", "artists"], keep="first")
+          .sort_index()
+          .reset_index(drop=True)
+    )
 
 
 class RecommendationEngine:
@@ -115,8 +131,9 @@ class RecommendationEngine:
 
     def recommend_from_playlist(self, song_indices: list[int], top_k: int = 10) -> pd.DataFrame:
         """Recommend songs based on multiple seed songs."""
+        empty_cols = ["track_name", "artists", "track_genre", "popularity", "similarity"]
         if len(song_indices) == 0:
-            return pd.DataFrame(columns=["track_name", "artists", "track_genre", "popularity", "similarity"])
+            return pd.DataFrame(columns=empty_cols)
 
         query_vector = self._combine_query_vectors(song_indices).reshape(1, -1)
         distances, indices = self.nn.kneighbors(query_vector, n_neighbors=self.k_neighbors)
@@ -130,7 +147,7 @@ class RecommendationEngine:
         keep = np.array(keep, dtype=int)
 
         if len(keep) == 0:
-            return pd.DataFrame(columns=["track_name", "artists", "track_genre", "popularity", "similarity"])
+            return pd.DataFrame(columns=empty_cols)
 
         indices = indices[keep]
         distances = distances[keep]
@@ -141,20 +158,20 @@ class RecommendationEngine:
         keep = np.array(keep, dtype=int)
 
         if len(keep) == 0:
-            return pd.DataFrame(columns=["track_name", "artists", "track_genre", "popularity", "similarity"])
+            return pd.DataFrame(columns=empty_cols)
 
-        indices = indices[keep][:top_k]
-        distances = distances[keep][:top_k]
-
+        # Over-fetch a generous slice so post-dedup we still have top_k
+        fetch = min(top_k * 3, len(keep))
+        indices = indices[keep][:fetch]
+        distances = distances[keep][:fetch]
         similarities = 1 - distances
 
-        # result = self.df.iloc[indices][["track_name", "artists", "track_genre", "popularity"]].copy()
         result = self.df.iloc[indices][
             ["track_id", "track_name", "artists", "album_name", "track_genre", "popularity"]
         ].copy()
         result["similarity"] = similarities
         result = result.reset_index(drop=True)
-        return result
+        return _dedupe_recs(result).head(top_k).reset_index(drop=True)
 
     def recommend(self, song_index: int, top_k: int = 10) -> pd.DataFrame:
         """Return top-K most similar songs (excluding same-name duplicates)."""
@@ -171,11 +188,13 @@ class RecommendationEngine:
         indices = indices[mask]
         distances = distances[mask]
 
-        # Remove same-name duplicates
+        # Remove same-name duplicates of the query
         indices, distances = self._filter_same_name(song_index, indices, distances)
 
-        indices = indices[:top_k]
-        distances = distances[:top_k]
+        # Over-fetch so post-dedup we still have top_k
+        fetch = min(top_k * 3, len(indices))
+        indices = indices[:fetch]
+        distances = distances[:fetch]
         similarities = 1 - distances
 
         result = self.df.iloc[indices][
@@ -183,47 +202,30 @@ class RecommendationEngine:
         ].copy()
         result["similarity"] = similarities
         result = result.reset_index(drop=True)
-        return result
+        return _dedupe_recs(result).head(top_k).reset_index(drop=True)
 
     def recommend_with_features(
         self, song_index: int, top_k: int = 10
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Return recommendations along with a feature comparison DataFrame."""
-        query_vector = self.feature_matrix[song_index].reshape(1, -1)
-        distances, indices = self.nn.kneighbors(
-            query_vector, n_neighbors=self.k_neighbors
-        )
+        recs = self.recommend(song_index, top_k=top_k)
 
-        distances = distances.flatten()
-        indices = indices.flatten()
-
-        mask = indices != song_index
-        indices = indices[mask]
-        distances = distances[mask]
-
-        indices, distances = self._filter_same_name(song_index, indices, distances)
-
-        indices = indices[:top_k]
-        distances = distances[:top_k]
-        similarities = 1 - distances
-
-        recs = self.df.iloc[indices][
-            ["track_id", "track_name", "artists", "album_name", "track_genre", "popularity"]
-        ].copy()
-        recs["similarity"] = similarities
-        recs = recs.reset_index(drop=True)
-
-        # Build feature comparison
         query_features = self.df.iloc[song_index][FEATURE_COLUMNS_ENCODED].to_dict()
         query_features["track_name"] = self.df.iloc[song_index]["track_name"]
         query_features["artists"] = self.df.iloc[song_index]["artists"]
         query_features["role"] = "Query"
 
         rows = [query_features]
-        for idx in indices:
-            row = self.df.iloc[idx][FEATURE_COLUMNS_ENCODED].to_dict()
-            row["track_name"] = self.df.iloc[idx]["track_name"]
-            row["artists"] = self.df.iloc[idx]["artists"]
+        for _, rec in recs.iterrows():
+            match = self.df[
+                (self.df["track_name"] == rec["track_name"])
+                & (self.df["artists"] == rec["artists"])
+            ]
+            if len(match) == 0:
+                continue
+            row = match.iloc[0][FEATURE_COLUMNS_ENCODED].to_dict()
+            row["track_name"] = rec["track_name"]
+            row["artists"] = rec["artists"]
             row["role"] = "Recommended"
             rows.append(row)
 
@@ -270,8 +272,9 @@ class RecommendationEngine:
         safe_denom = np.where(cand_norms * query_norm > 0, cand_norms * query_norm, 1.0)
         similarities = dots / safe_denom
 
-        # Top-K
-        ranked = np.argsort(similarities)[::-1][:top_k]
+        # Over-fetch so post-dedup we still have top_k
+        fetch = min(top_k * 3, len(similarities))
+        ranked = np.argsort(similarities)[::-1][:fetch]
         top_indices = candidate_indices[ranked]
         top_sims = similarities[ranked]
 
@@ -280,7 +283,7 @@ class RecommendationEngine:
         ].copy()
         result["similarity"] = top_sims
         result = result.reset_index(drop=True)
-        return result
+        return _dedupe_recs(result).head(top_k).reset_index(drop=True)
 
     def recommend_by_gmm(
         self,
@@ -299,13 +302,15 @@ class RecommendationEngine:
         safe_denom = np.where(all_norms * query_norm > 0, all_norms * query_norm, 1.0)
         similarities = dots / safe_denom
 
-        # Exclude self and same-name songs
+        # Exclude self and same-name songs (vectorized)
         similarities[song_index] = -np.inf
-        for i in range(len(self.df)):
-            if self.df.iloc[i]["track_name"] == query_name and i != song_index:
-                similarities[i] = -np.inf
+        same_name_mask = (self.df["track_name"] == query_name).values
+        same_name_mask[song_index] = False  # already excluded
+        similarities[same_name_mask] = -np.inf
 
-        ranked = np.argsort(similarities)[::-1][:top_k]
+        # Over-fetch so post-dedup we still have top_k
+        fetch = min(top_k * 3, len(similarities))
+        ranked = np.argsort(similarities)[::-1][:fetch]
         top_sims = similarities[ranked]
 
         result = self.df.iloc[ranked][
@@ -313,47 +318,83 @@ class RecommendationEngine:
         ].copy()
         result["similarity"] = top_sims
         result = result.reset_index(drop=True)
-        return result
+        return _dedupe_recs(result).head(top_k).reset_index(drop=True)
 
     def song_label(self, index: int) -> str:
         """Human-readable label for a song."""
         row = self.df.iloc[index]
         return f"{row['track_name']} - {row['artists']}"
 
-def rerank_feature_auto(
-    engine: RecommendationEngine,
+
+# ── MMR (Maximum Marginal Relevance) reranking ────────────────────────────────
+
+
+def rerank_mmr(
+    engine: "RecommendationEngine",
     recs: pd.DataFrame,
     seed_index: int,
-    alpha: float = 0.15,
-    ) -> pd.DataFrame:
-    """Simple feature-aware reranking using distance to the query song vector."""
-    if recs.empty:
-        return recs
+    lam: float = 0.7,
+    top_k: int = 10,
+) -> pd.DataFrame:
+    """Rerank a recommendation set using Maximum Marginal Relevance (MMR).
 
-    query_vec = engine.feature_matrix[seed_index]
-    rerank_scores = []
+    Reference: Carbonell & Goldstein (SIGIR '98).  At each step pick the
+    candidate that maximizes:
 
-    for i in range(len(recs)):
-        rec_name = recs.iloc[i]["track_name"]
-        rec_artist = recs.iloc[i]["artists"]
+        score(c) = lam * sim(c, query)  -  (1 - lam) * max_{s in S} sim(c, s)
 
+    where S is the already-selected set.  lam=1 reduces to pure relevance;
+    lam=0 reduces to "farthest-first" diversity.  The first pick is the
+    most-relevant candidate (S is empty so the redundancy term is undefined).
+
+    Operates on the engine's standardized feature matrix; cosine similarity
+    is the similarity function throughout.
+    """
+    if recs.empty or top_k <= 0:
+        return recs.head(0)
+
+    # Resolve each rec back to its catalog row index.
+    cand_indices: list[int] = []
+    for _, rec in recs.iterrows():
         match = engine.df[
-            (engine.df["track_name"] == rec_name) &
-            (engine.df["artists"] == rec_artist)
+            (engine.df["track_name"] == rec["track_name"])
+            & (engine.df["artists"] == rec["artists"])
         ]
-
         if len(match) == 0:
-            rerank_scores.append(recs.iloc[i]["similarity"])
             continue
+        cand_indices.append(int(match.index[0]))
+    if not cand_indices:
+        return recs.head(0)
 
-        rec_idx = match.index[0]
-        rec_vec = engine.feature_matrix[rec_idx]
+    cand_idx_arr = np.asarray(cand_indices, dtype=int)
+    cand_vecs = engine.feature_matrix[cand_idx_arr]
+    query_vec = engine.feature_matrix[seed_index]
 
-        feature_dist = np.linalg.norm(rec_vec - query_vec)
-        new_score = float(recs.iloc[i]["similarity"]) - alpha * feature_dist
-        rerank_scores.append(new_score)
+    # Cosine similarity to query (rel) and pairwise candidate-candidate (cc).
+    cand_norms = np.linalg.norm(cand_vecs, axis=1)
+    cand_norms = np.where(cand_norms > 0, cand_norms, 1.0)
+    q_norm = np.linalg.norm(query_vec) or 1.0
+    rel = (cand_vecs @ query_vec) / (cand_norms * q_norm)
+    cc_sim = (cand_vecs @ cand_vecs.T) / np.outer(cand_norms, cand_norms)
 
-    reranked = recs.copy()
-    reranked["rerank_score"] = rerank_scores
-    reranked = reranked.sort_values("rerank_score", ascending=False).reset_index(drop=True)
-    return reranked
+    M = len(cand_idx_arr)
+    selected: list[int] = []
+    remaining: set[int] = set(range(M))
+    mmr_scores: list[float] = []
+
+    first = int(np.argmax(rel))
+    selected.append(first); remaining.discard(first)
+    mmr_scores.append(float(rel[first]))
+
+    while len(selected) < top_k and remaining:
+        rem = np.fromiter(remaining, dtype=int, count=len(remaining))
+        redundancy = cc_sim[np.ix_(rem, selected)].max(axis=1)
+        scores = lam * rel[rem] - (1.0 - lam) * redundancy
+        local_best = int(np.argmax(scores))
+        chosen = int(rem[local_best])
+        selected.append(chosen); remaining.discard(chosen)
+        mmr_scores.append(float(scores[local_best]))
+
+    out = recs.iloc[selected].copy().reset_index(drop=True)
+    out["mmr_score"] = mmr_scores
+    return out

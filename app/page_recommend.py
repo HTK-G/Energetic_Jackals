@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import base64
 import json
+import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 from urllib import error, parse, request
 
@@ -13,8 +15,80 @@ from pathlib import Path
 import joblib
 
 from src.features import FEATURE_COLUMNS_ENCODED
-from src.recommend import RecommendationEngine, rerank_feature_auto
+from src.recommend import RecommendationEngine, rerank_mmr
 from src.explain import build_comparison_radar, build_single_radar, explain_recommendation
+
+
+def _plot_feature_space(
+    pca_2d: np.ndarray,
+    df: pd.DataFrame,
+    query_idx: int,
+    rec_indices: np.ndarray,
+) -> go.Figure:
+    """PCA-2D scatter highlighting the query song + top-K recommendations.
+
+    Layer 1: full catalog as faint grey dots (sampled for plot performance).
+    Layer 2: recommendations as numbered amber circles.
+    Layer 3: query as a green star.
+    """
+    n = len(pca_2d)
+    sample_size = min(8000, n)
+    rng = np.random.default_rng(42)
+    bg_idx = rng.choice(n, size=sample_size, replace=False)
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=pca_2d[bg_idx, 0], y=pca_2d[bg_idx, 1],
+        mode="markers",
+        marker=dict(size=2, color="rgba(200,200,200,0.18)"),
+        hoverinfo="skip", showlegend=False, name="catalog",
+    ))
+
+    # Recommendations
+    if len(rec_indices) > 0:
+        rec_df = df.iloc[rec_indices]
+        fig.add_trace(go.Scatter(
+            x=pca_2d[rec_indices, 0], y=pca_2d[rec_indices, 1],
+            mode="markers+text",
+            marker=dict(size=12, color="#c8956c", opacity=0.9,
+                        line=dict(width=1, color="white")),
+            text=[str(i + 1) for i in range(len(rec_indices))],
+            textposition="top center",
+            textfont=dict(size=10, color="white"),
+            customdata=np.column_stack([
+                rec_df["track_name"].values, rec_df["artists"].values,
+                rec_df["track_genre"].values,
+            ]),
+            hovertemplate="<b>%{customdata[0]}</b><br>%{customdata[1]}<br>"
+                          "%{customdata[2]}<extra></extra>",
+            name="Recommendations",
+        ))
+
+    # Query
+    q = df.iloc[query_idx]
+    fig.add_trace(go.Scatter(
+        x=[pca_2d[query_idx, 0]], y=[pca_2d[query_idx, 1]],
+        mode="markers",
+        marker=dict(size=18, symbol="star", color="#4ade80",
+                    line=dict(width=1, color="white")),
+        customdata=np.array([[q["track_name"], q["artists"], q["track_genre"]]]),
+        hovertemplate="<b>%{customdata[0]}</b> (query)<br>%{customdata[1]}<br>"
+                      "%{customdata[2]}<extra></extra>",
+        name="Query",
+    ))
+
+    fig.update_layout(
+        xaxis=dict(title="PC1", gridcolor="rgba(255,255,255,0.08)", zeroline=False),
+        yaxis=dict(title="PC2", gridcolor="rgba(255,255,255,0.08)", zeroline=False),
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="white"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02,
+                    xanchor="right", x=1, font=dict(size=10)),
+        margin=dict(l=40, r=20, t=40, b=40),
+        height=480,
+    )
+    return fig
 
 
 ARTIFACTS_DIR = Path(__file__).resolve().parents[1] / "artifacts"
@@ -22,10 +96,34 @@ RECOMMEND_ARTIFACTS = [
     "feature_matrix.joblib",
     "kmeans_best.joblib",
     "gmm_full_best.joblib",
+    "pca_2d.joblib",
 ]
 
 
-FALLBACK_COVER_URL = "https://placehold.co/300x300?text=No+Cover"
+# Inline coffee-gradient + music-note icon, used when Spotify cover is unavailable.
+NO_COVER_DATA_URL = (
+    "data:image/svg+xml;utf8,"
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 80'>"
+    "<defs><linearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'>"
+    "<stop offset='0%25' stop-color='%23362a22'/>"
+    "<stop offset='100%25' stop-color='%23211814'/>"
+    "</linearGradient></defs>"
+    "<rect width='80' height='80' rx='12' fill='url(%23g)'/>"
+    "<path d='M52 22l-22 5v25.5a7 7 0 1 1-3-5.7V32.6l16-3.6v17.6a7 7 0 1 1-3-5.7z' "
+    "fill='%23c8956c' opacity='0.85'/></svg>"
+)
+FALLBACK_COVER_URL = NO_COVER_DATA_URL  # back-compat alias used by older code paths
+
+
+# Hand-picked cold-start suggestions (resolved to catalog indices on first load).
+SUGGESTED_SONGS: list[tuple[str, str]] = [
+    ("Blinding Lights", "The Weeknd"),
+    ("Bohemian Rhapsody", "Queen"),
+    ("bad guy", "Billie Eilish"),
+    ("Smells Like Teen Spirit", "Nirvana"),
+    ("Shape of You", "Ed Sheeran"),
+    ("Take Five", "Dave Brubeck"),
+]
 
 
 def _normalize_track_id(value: object) -> str | None:
@@ -52,14 +150,69 @@ def _set_active_player(track_name: str, artists: str, embed_url: str) -> None:
     st.session_state["active_spotify_label"] = f"Now playing: {track_name} - {artists}"
 
 
-def _seed_song_label(df: pd.DataFrame, index: int) -> str:
-    """Standardized seed-song label with rich context for the selectbox."""
-    row = df.iloc[index]
-    return (
-        f"{row['track_name']} | {row['artists']} | "
-        f"{row.get('album_name', 'Unknown Album')} | "
-        f"{row['track_genre']} | Pop {int(row['popularity'])}"
-    )
+@st.cache_data(show_spinner=False)
+def _resolve_suggested_songs(_df: pd.DataFrame) -> list[dict]:
+    """Resolve SUGGESTED_SONGS to actual catalog rows on first run.
+
+    Underscore prefix on _df tells streamlit not to hash the DataFrame.
+    Returns: list of {idx, track_name, artists, track_id} dicts.  Songs
+    that don't match anything in the catalog are silently dropped.
+    """
+    out: list[dict] = []
+    for name, artist in SUGGESTED_SONGS:
+        m = _df[
+            (_df["track_name"].str.lower().str.contains(name.lower(), na=False, regex=False))
+            & (_df["artists"].str.lower().str.contains(artist.lower(), na=False, regex=False))
+        ]
+        if not len(m):
+            continue
+        idx = int(m.index[0])
+        row = _df.iloc[idx]
+        out.append({
+            "idx": idx,
+            "track_name": row["track_name"],
+            "artists": row["artists"],
+            "track_id": _normalize_track_id(row.get("track_id")),
+        })
+    return out
+
+
+# Visual tokens injected once per page render.  Defined here (not in app/app.py)
+# because they target structures specific to the recommendation page.
+_SONG_PAGE_CSS = """
+<style>
+  /* Search-result + selected-song cards: lighter than page bg for layering */
+  .stContainer:has(.song-row), .song-card-shell {
+      background: #211814;
+  }
+  /* Recommendation-card text hierarchy */
+  .rec-name { font-size: 16px; font-weight: 600; color: #FFFFFF; line-height: 1.2; margin: 0; }
+  .rec-artist { font-size: 13px; color: #A0A0A0; margin: 2px 0 8px 0; }
+  .rec-meta { font-size: 12px; color: #A0A0A0; margin-top: 6px; }
+  .genre-tag {
+      display: inline-block;
+      background: rgba(200,149,108,0.15);
+      color: #d4a87e;
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      margin-right: 6px;
+  }
+  .similarity-pill {
+      display: inline-block;
+      font-family: ui-monospace, monospace;
+      font-size: 12px;
+      color: #c8956c;
+  }
+  /* Downgraded "Feature Comparison" expander */
+  .stExpander summary p { font-size: 12px !important; color: #A0A0A0 !important; }
+
+  /* Search row: tighter spacing */
+  .song-row .stImage img { border-radius: 8px; }
+</style>
+"""
+
+
 
 
 def _get_spotify_credentials() -> tuple[str | None, str | None]:
@@ -183,10 +336,11 @@ def _load_artifacts():
     engine = RecommendationEngine(df_encoded, feature_matrix)
     km_result = joblib.load(ARTIFACTS_DIR / "kmeans_best.joblib")
     gmm_result = joblib.load(ARTIFACTS_DIR / "gmm_full_best.joblib")
-    return engine, df_encoded, feature_matrix, km_result, gmm_result
+    pca_2d = joblib.load(ARTIFACTS_DIR / "pca_2d.joblib")
+    return engine, df_encoded, feature_matrix, km_result, gmm_result, pca_2d
 
 
-engine, df_encoded, feature_matrix, km_result, gmm_result = _load_artifacts()
+engine, df_encoded, feature_matrix, km_result, gmm_result, pca_2d = _load_artifacts()
 
 if "active_spotify_embed_url" not in st.session_state:
     st.session_state["active_spotify_embed_url"] = None
@@ -196,8 +350,8 @@ if "active_spotify_meta" not in st.session_state:
     st.session_state["active_spotify_meta"] = None
 if "recommendation_payload" not in st.session_state:
     st.session_state["recommendation_payload"] = None
-if "selected_seed_index" not in st.session_state:
-    st.session_state["selected_seed_index"] = None
+if "selected_song_index" not in st.session_state:
+    st.session_state["selected_song_index"] = None
 
 with st.sidebar:
     st.subheader("Spotify Player")
@@ -211,153 +365,136 @@ with st.sidebar:
     else:
         st.caption("No song selected yet. Use Play or Add to Player.")
 
+st.markdown(_SONG_PAGE_CSS, unsafe_allow_html=True)
+
 st.title("Song Search & Recommend")
 st.caption(f"{len(df_encoded):,} songs loaded from Spotify dataset")
 
 # --- Song Search & Selection ---
-st.subheader("Find Your Seed Song")
-st.caption("Search for a song or artist and select it to find similar recommendations.")
+st.subheader("Find a Song")
+st.caption("Search for a song or artist, or pick one of the suggestions below.")
 
 search_query = st.text_input(
     "Search for a song or artist",
     placeholder="e.g. Blinding Lights, Drake, Bohemian Rhapsody...",
-    key="seed_search",
+    key="song_search",
 )
 
-#  HEAD
-# if selection_mode == "Search results" and search_results is not None and len(search_results) > 0:
-#     search_option_labels = [
-#         f"{row['track_name']} - {row['artists']}"
-#         for _, row in search_results.iterrows()
-#     ]
+selected_index = st.session_state["selected_song_index"]
 
-#     selected_search_label = st.selectbox(
-#         "Pick from search results",
-#         options=search_option_labels,
-#         key="search_select",
-#     )
 
-#     selected_row = search_results[
-#         (search_results["track_name"] + " - " + search_results["artists"]) == selected_search_label
-#     ].iloc[0]
+def _set_selection(idx: int) -> None:
+    st.session_state["selected_song_index"] = int(idx)
 
-#     match_df = engine.df[
-#         (engine.df["track_name"] == selected_row["track_name"]) &
-#         (engine.df["artists"] == selected_row["artists"]) &
-#         (engine.df["album_name"] == selected_row["album_name"])
-#     ]
 
-#     if len(match_df) == 0:
-#         st.error("Could not map the selected search result back to the full dataset.")
-#         st.stop()
-
-#     selected_index = match_df.index[0]
-# 
-selected_index = st.session_state["selected_seed_index"]
-
-if search_query.strip():
-    matches = engine.search_songs(search_query, limit=50)
+# Cold start: hand-picked suggestions
+if not search_query.strip():
+    suggestions = _resolve_suggested_songs(engine.df)
+    if suggestions:
+        st.markdown("**Try one of these:**")
+        chip_cols = st.columns(len(suggestions))
+        for i, sug in enumerate(suggestions):
+            with chip_cols[i]:
+                clicked = st.button(
+                    f"{sug['track_name']}\n— {sug['artists']}",
+                    key=f"chip_{i}",
+                    width="stretch",
+                )
+                if clicked:
+                    _set_selection(sug["idx"])
+                    st.rerun()
+    if selected_index is None:
+        st.info("👉 Pick one of the suggestions or type a song name above.")
+        st.stop()
+else:
+    matches = engine.search_songs(search_query, limit=20)
     if matches.empty:
         st.warning("No matching songs found. Try a different query.")
-        st.session_state["selected_seed_index"] = None
-        selected_index = None
+        st.session_state["selected_song_index"] = None
+        st.stop()
+
+    # Resolve unique catalog indices in result order.
+    option_indices: list[int] = []
+    seen: set[int] = set()
+    for _, match_row in matches.iterrows():
+        found = engine.df[
+            (engine.df["track_name"] == match_row["track_name"])
+            & (engine.df["artists"] == match_row["artists"])
+        ]
+        if len(found):
+            idx = int(found.index[0])
+            if idx not in seen:
+                seen.add(idx); option_indices.append(idx)
+
+    if not option_indices:
+        st.warning("Could not map search results to the recommendation catalog.")
+        st.session_state["selected_song_index"] = None
+        st.stop()
+
+    if selected_index not in option_indices:
+        selected_index = option_indices[0]
+        st.session_state["selected_song_index"] = selected_index
+
+    # Native selectbox — collapses automatically once a song is picked.
+    selected_index = st.selectbox(
+        "Pick a song from the search results",
+        options=option_indices,
+        index=option_indices.index(selected_index),
+        format_func=lambda idx: (
+            f"{engine.df.iloc[idx]['track_name']}  —  {engine.df.iloc[idx]['artists']}"
+        ),
+        key="search_select",
+    )
+    st.session_state["selected_song_index"] = int(selected_index)
+
+# At this point we have a selected song.  Render the inline preview (no album cover here).
+selected_index = st.session_state["selected_song_index"]
+selected_row = engine.df.iloc[int(selected_index)]
+selected_track_id = _normalize_track_id(selected_row.get("track_id"))
+selected_release_date = ""
+if selected_track_id:
+    cid, sec = _get_spotify_credentials()
+    if cid and sec:
+        meta = _get_spotify_track_metadata(selected_track_id, cid, sec)
+        selected_release_date = meta.get("spotify_release_date", "")
+
+with st.container(border=True):
+    st.markdown(
+        f"<div class='rec-name'>{selected_row['track_name']}</div>"
+        f"<div class='rec-artist'>{selected_row['artists']}</div>"
+        f"<div class='rec-meta'>"
+        f"<span class='genre-tag'>{selected_row.get('track_genre', '—')}</span>"
+        f"Album: {selected_row.get('album_name', '—')} · "
+        f"Pop {int(selected_row.get('popularity', 0))}"
+        f"{' · ' + selected_release_date if selected_release_date else ''}"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+    seed_action_col1, seed_action_col2, _ = st.columns([1, 1, 4])
+    add_to_player = seed_action_col1.button(
+        "Add to Player",
+        key="add_seed_to_player",
+        disabled=selected_track_id is None,
+    )
+    if selected_track_id:
+        spotify_track_url, _spotify_embed = _build_spotify_urls(selected_track_id)
+        seed_action_col2.markdown(f"[🎵 Open in Spotify]({spotify_track_url})")
     else:
-        # Map matches to catalog indices and keep only unique indices.
-        option_indices: list[int] = []
-        seen_indices: set[int] = set()
-        for _, match_row in matches.iterrows():
-            found = engine.df[
-                (engine.df["track_name"] == match_row["track_name"]) &
-                (engine.df["artists"] == match_row["artists"])
-            ]
-            if len(found) > 0:
-                idx = int(found.index[0])
-                if idx not in seen_indices:
-                    option_indices.append(idx)
-                    seen_indices.add(idx)
-
-        if not option_indices:
-            st.warning("Could not map search results to the recommendation catalog.")
-            st.session_state["selected_seed_index"] = None
-            selected_index = None
-        else:
-            if selected_index not in option_indices:
-                selected_index = option_indices[0]
-                st.session_state["selected_seed_index"] = selected_index
-
-            selected_index = st.selectbox(
-                "Select a song to use as your seed",
-                options=option_indices,
-                index=option_indices.index(selected_index),
-                format_func=lambda idx: _seed_song_label(engine.df, idx),
-                key="search_select",
-            )
-
-            selected_row = engine.df.iloc[int(selected_index)]
-            selected_track_id = _normalize_track_id(selected_row.get("track_id"))
-            selected_cover_url = ""
-            selected_release_date = ""
-            client_id, client_secret = _get_spotify_credentials()
-            if selected_track_id and client_id and client_secret:
-                selected_meta = _get_spotify_track_metadata(selected_track_id, client_id, client_secret)
-                selected_cover_url = selected_meta.get("album_cover_url", "")
-                selected_release_date = selected_meta.get("spotify_release_date", "")
-
-            with st.container(border=True):
-                seed_left, seed_right = st.columns([1, 3])
-                with seed_left:
-                    # st.image(selected_cover_url if selected_cover_url else FALLBACK_COVER_URL, width=140)
-                    if selected_cover_url:
-                        st.image(selected_cover_url, width=140)
-                    else:
-                        st.caption("No album cover available")
-
-                with seed_right:
-                    st.markdown(f"**{selected_row['track_name']}**")
-                    st.write(
-                        f"{selected_row['artists']} | Album: {selected_row.get('album_name', 'Unknown Album')} | "
-                        f"Genre: {selected_row.get('track_genre', 'Unknown Genre')} | "
-                        f"Popularity: {int(selected_row.get('popularity', 0))}"
-                    )
-                    if selected_release_date:
-                        st.caption(f"Release Date: {selected_release_date}")
-
-                seed_action_col1, seed_action_col2 = st.columns([1, 2])
-                add_to_player = seed_action_col1.button(
-                    "Add to Player",
-                    key="add_seed_to_player",
-                    disabled=selected_track_id is None,
-                )
-                if selected_track_id:
-                    spotify_track_url, _ = _build_spotify_urls(selected_track_id)
-                    seed_action_col2.markdown(f"[🎵 Open in Spotify]({spotify_track_url})")
-                else:
-                    seed_action_col2.caption("❌ Spotify link unavailable for this seed song.")
-
-            if add_to_player and selected_track_id is not None:
-                _, selected_embed_url = _build_spotify_urls(selected_track_id)
-                _set_active_player(
-                    selected_row["track_name"],
-                    selected_row["artists"],
-                    selected_embed_url,
-                )
-                st.session_state["active_spotify_meta"] = {
-                    "album_name": selected_row.get("album_name", "Unknown Album"),
-                    "track_genre": selected_row.get("track_genre", "Unknown Genre"),
-                    "popularity": int(selected_row.get("popularity", 0)),
-                    "album_cover_url": "",
-                }
-                st.rerun()
-
-            st.session_state["selected_seed_index"] = int(selected_index)
-#  origin/master
-else:
-    st.info("👉 Start by searching for a song or artist to select it as your seed song.")
-    st.session_state["selected_seed_index"] = None
-    selected_index = None
-
-if selected_index is None:
-    st.stop()
+        seed_action_col2.caption("❌ Spotify link unavailable.")
+    if add_to_player and selected_track_id is not None:
+        _, selected_embed_url = _build_spotify_urls(selected_track_id)
+        _set_active_player(
+            selected_row["track_name"],
+            selected_row["artists"],
+            selected_embed_url,
+        )
+        st.session_state["active_spotify_meta"] = {
+            "album_name": selected_row.get("album_name", "Unknown Album"),
+            "track_genre": selected_row.get("track_genre", "Unknown Genre"),
+            "popularity": int(selected_row.get("popularity", 0)),
+            "album_cover_url": "",
+        }
+        st.rerun()
 
 # Recommendation mode
 rec_mode = st.radio(
@@ -366,16 +503,25 @@ rec_mode = st.radio(
     horizontal=True,
 )
 
-st.subheader("Reranking Strategy")
+st.subheader("Diversity Reranking (MMR)")
+st.caption(
+    "Maximum Marginal Relevance reranks the candidate pool by trading off "
+    "similarity to the query against diversity within the recommendations. "
+    "Higher λ = closer to query; lower λ = more variety."
+)
 
 rerank_mode = st.radio(
     "Reranking",
-    ["Default", "Feature-aware"],
+    ["Off (relevance only)", "MMR (diverse)"],
     horizontal=True,
 )
-
-# if payload["rerank_mode"] != "Default":
-#     st.info("Feature-aware reranking adjusts recommendations based on audio feature similarity.")
+mmr_lambda = st.select_slider(
+    "λ (relevance ↔ diversity)",
+    options=[0.5, 0.7, 0.9],
+    value=0.7,
+    disabled=(rerank_mode != "MMR (diverse)"),
+    key="mmr_lambda",
+)
 
 top_k = st.slider("Number of recommendations", min_value=3, max_value=20, value=10)
 
@@ -384,18 +530,27 @@ if rec_mode in ("K-Means cluster", "GMM posterior"):
     st.caption(f"Using precomputed model with K={_k_used}.")
 
 if st.button("Recommend", type="primary"):
-    # Get recommendations based on mode
+    # If MMR is on we ask for an over-fetched candidate pool so MMR has room
+    # to diversify; otherwise we just take the requested top_k directly.
+    use_mmr = (rerank_mode == "MMR (diverse)")
+    fetch_k = max(top_k * 5, 50) if use_mmr else top_k
+
     cluster_message = None
+    feature_comp = None
     if rec_mode == "Embedding (KNN)":
-        recs, feature_comp = engine.recommend_with_features(selected_index, top_k=top_k)
+        if use_mmr:
+            recs = engine.recommend(selected_index, top_k=fetch_k)
+        else:
+            recs, feature_comp = engine.recommend_with_features(selected_index, top_k=top_k)
     elif rec_mode == "K-Means cluster":
-        recs = engine.recommend_by_cluster(selected_index, km_result.labels, top_k=top_k)
-        feature_comp = None
+        recs = engine.recommend_by_cluster(selected_index, km_result.labels, top_k=fetch_k)
         cluster_message = f"Recommending within K-Means cluster {int(km_result.labels[selected_index])}"
     else:  # GMM posterior
-        recs = engine.recommend_by_gmm(selected_index, gmm_result.probabilities, top_k=top_k)
-        feature_comp = None
+        recs = engine.recommend_by_gmm(selected_index, gmm_result.probabilities, top_k=fetch_k)
         cluster_message = "Recommending by GMM posterior similarity"
+
+    if use_mmr:
+        recs = rerank_mmr(engine, recs, selected_index, lam=float(mmr_lambda), top_k=top_k)
 
     recs = _attach_spotify_fields(recs)
     recs = _attach_spotify_metadata(recs)
@@ -404,6 +559,7 @@ if st.button("Recommend", type="primary"):
         "selected_index": int(selected_index),
         "rec_mode": rec_mode,
         "rerank_mode": rerank_mode,
+        "mmr_lambda": float(mmr_lambda),
         "cluster_message": cluster_message,
         "recs": recs,
         "feature_comp": feature_comp,
@@ -467,14 +623,12 @@ if payload is not None:
     if payload["cluster_message"]:
         st.info(payload["cluster_message"])
 
-    if payload["rerank_mode"] == "Feature-aware":
-        recs = rerank_feature_auto(engine, recs, selected_index)
-        st.info("Feature-aware auto reranking is applied.")
-
-
     st.subheader(f"Top {len(recs)} Recommendations")
-    if payload["rerank_mode"] != "Default":
-        st.info("Reranking is applied (demo version). This shows how results can be adjusted based on audio features.")
+    if payload["rerank_mode"] == "MMR (diverse)":
+        st.info(
+            f"Reranked with MMR (λ={payload['mmr_lambda']}). "
+            "Each pick maximizes λ·similarity-to-query − (1-λ)·max-similarity-to-already-chosen."
+        )
 
     # Feature comparison (build inline if not from recommend_with_features)
     if feature_comp is None:
@@ -508,49 +662,46 @@ if payload is not None:
         spotify_available = bool(rec["spotify_available"])
 
         with st.container(border=True):
-            card_left, card_right = st.columns([1, 3])
+            card_left, card_right = st.columns([1, 4])
             with card_left:
-                cover_url = rec.get("album_cover_url", "")
-                st.image(cover_url if cover_url else FALLBACK_COVER_URL, width=140)
+                cover_url = rec.get("album_cover_url", "") or NO_COVER_DATA_URL
+                st.image(cover_url, width=110)
             with card_right:
-                st.markdown(f"**{rec_name}**")
-                st.write(
-                    f"{rec_artist} | Album: {rec_album} | Genre: {rec_genre} | "
-                    f"Popularity: {rec_popularity} | Similarity: {similarity:.4f}"
-                )
                 release_date = rec.get("spotify_release_date", "")
-                if release_date:
-                    st.caption(f"Release Date: {release_date}")
+                meta_bits = [
+                    f"<span class='genre-tag'>{rec_genre}</span>",
+                    f"<span class='similarity-pill'>Similarity {similarity:.3f}</span>",
+                ]
+                meta_line2 = (
+                    f"Album: {rec_album} · Pop {rec_popularity}"
+                    + (f" · {release_date}" if release_date else "")
+                )
+                st.markdown(
+                    f"<div class='rec-name'>{i + 1}. {rec_name}</div>"
+                    f"<div class='rec-artist'>{rec_artist}</div>"
+                    f"<div>{''.join(meta_bits)}</div>"
+                    f"<div class='rec-meta'>{meta_line2}</div>",
+                    unsafe_allow_html=True,
+                )
 
-#  HEAD
-#             radar_fig = build_comparison_radar(
-#                 feature_comp[feature_comp["role"] == "Query"].iloc[0],
-#                 rec_feature_row,
-#                 df_encoded,
-#                 query_name=query_row["track_name"],
-#                 rec_name=rec_name,
-#             )
-#             st.plotly_chart(radar_fig, use_container_width=True, key=f"compare_radar_{i}")
-# 
-            action_col1, action_col2 = st.columns([1, 2])
-            if action_col1.button(
-                "▶ Play",
-                key=f"play_{selected_index}_{i}",
-                disabled=not spotify_available,
-            ):
-                _set_active_player(rec_name, rec_artist, rec["spotify_embed_url"])
-                st.session_state["active_spotify_meta"] = {
-                    "album_name": rec_album,
-                    "track_genre": rec_genre,
-                    "popularity": rec_popularity,
-                    "album_cover_url": rec.get("album_cover_url", ""),
-                }
-                st.rerun()
-
-            if spotify_available:
-                action_col2.markdown(f"[🎵 Open in Spotify]({rec['spotify_url']})")
-            else:
-                action_col2.caption("❌ Spotify link unavailable for this recommendation.")
+                action_col1, action_col2 = st.columns([1, 2])
+                if action_col1.button(
+                    "▶ Play",
+                    key=f"play_{selected_index}_{i}",
+                    disabled=not spotify_available,
+                ):
+                    _set_active_player(rec_name, rec_artist, rec["spotify_embed_url"])
+                    st.session_state["active_spotify_meta"] = {
+                        "album_name": rec_album,
+                        "track_genre": rec_genre,
+                        "popularity": rec_popularity,
+                        "album_cover_url": rec.get("album_cover_url", ""),
+                    }
+                    st.rerun()
+                if spotify_available:
+                    action_col2.markdown(f"[🎵 Open in Spotify]({rec['spotify_url']})")
+                else:
+                    action_col2.caption("❌ Spotify link unavailable.")
 
             rec_feature_match = rec_feature_rows[
                 (rec_feature_rows["track_name"] == rec_name)
@@ -558,7 +709,7 @@ if payload is not None:
             ]
             if len(rec_feature_match) > 0:
                 rec_feature_row = rec_feature_match.iloc[0]
-                with st.expander("Feature Comparison", expanded=False):
+                with st.expander("Feature comparison", expanded=False):
                     explanation = explain_recommendation(query_feature_row, rec_feature_row)
                     st.markdown(f"*{explanation}*")
 
@@ -570,4 +721,23 @@ if payload is not None:
                         rec_name=rec_name,
                     )
                     st.plotly_chart(radar_fig, width="stretch", key=f"compare_radar_{i}")
-#  origin/master
+
+    # ── Feature Space (PCA) panel ────────────────────────────────────────────
+    st.subheader("Feature Space (PCA)")
+    st.caption(
+        "Catalog projected to 2-D via PCA.  The query song (★) and top-K "
+        "recommendations (numbered amber circles) are highlighted, so you can "
+        "see where they live relative to the rest of the catalog."
+    )
+    rec_indices: list[int] = []
+    for _, rec in recs.iterrows():
+        match = engine.df[
+            (engine.df["track_name"] == rec["track_name"])
+            & (engine.df["artists"] == rec["artists"])
+        ]
+        if len(match):
+            rec_indices.append(int(match.index[0]))
+    pca_fig = _plot_feature_space(
+        pca_2d, engine.df, selected_index, np.asarray(rec_indices, dtype=int),
+    )
+    st.plotly_chart(pca_fig, width="stretch", key="recommend_pca")
