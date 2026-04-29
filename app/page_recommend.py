@@ -342,28 +342,11 @@ def _load_artifacts():
 
 engine, df_encoded, feature_matrix, km_result, gmm_result, pca_2d = _load_artifacts()
 
-if "active_spotify_embed_url" not in st.session_state:
-    st.session_state["active_spotify_embed_url"] = None
-if "active_spotify_label" not in st.session_state:
-    st.session_state["active_spotify_label"] = ""
-if "active_spotify_meta" not in st.session_state:
-    st.session_state["active_spotify_meta"] = None
+# Initialize page-specific session state
 if "recommendation_payload" not in st.session_state:
     st.session_state["recommendation_payload"] = None
 if "selected_song_index" not in st.session_state:
     st.session_state["selected_song_index"] = None
-
-with st.sidebar:
-    st.subheader("Spotify Player")
-    if st.session_state["active_spotify_embed_url"]:
-        st.caption(st.session_state["active_spotify_label"])
-        st.components.v1.iframe(
-            st.session_state["active_spotify_embed_url"],
-            height=380,
-            scrolling=False,
-        )
-    else:
-        st.caption("No song selected yet. Use Play or Add to Player.")
 
 st.markdown(_SONG_PAGE_CSS, unsafe_allow_html=True)
 
@@ -447,29 +430,36 @@ else:
     )
     st.session_state["selected_song_index"] = int(selected_index)
 
-# At this point we have a selected song.  Render the inline preview (no album cover here).
+# At this point we have a selected song.  Render the inline preview with album cover.
 selected_index = st.session_state["selected_song_index"]
 selected_row = engine.df.iloc[int(selected_index)]
 selected_track_id = _normalize_track_id(selected_row.get("track_id"))
 selected_release_date = ""
+selected_album_cover_url = NO_COVER_DATA_URL
 if selected_track_id:
     cid, sec = _get_spotify_credentials()
     if cid and sec:
         meta = _get_spotify_track_metadata(selected_track_id, cid, sec)
         selected_release_date = meta.get("spotify_release_date", "")
+        selected_album_cover_url = meta.get("album_cover_url", "") or NO_COVER_DATA_URL
 
 with st.container(border=True):
-    st.markdown(
-        f"<div class='rec-name'>{selected_row['track_name']}</div>"
-        f"<div class='rec-artist'>{selected_row['artists']}</div>"
-        f"<div class='rec-meta'>"
-        f"<span class='genre-tag'>{selected_row.get('track_genre', '—')}</span>"
-        f"Album: {selected_row.get('album_name', '—')} · "
-        f"Pop {int(selected_row.get('popularity', 0))}"
-        f"{' · ' + selected_release_date if selected_release_date else ''}"
-        f"</div>",
-        unsafe_allow_html=True,
-    )
+    card_left, card_right = st.columns([1, 4])
+    with card_left:
+        st.image(selected_album_cover_url, width=110)
+    with card_right:
+        st.markdown(
+            f"<div class='rec-name'>{selected_row['track_name']}</div>"
+            f"<div class='rec-artist'>{selected_row['artists']}</div>"
+            f"<div class='rec-meta'>"
+            f"<span class='genre-tag'>{selected_row.get('track_genre', '—')}</span>"
+            f"Album: {selected_row.get('album_name', '—')} · "
+            f"Pop {int(selected_row.get('popularity', 0))}"
+            f"{' · ' + selected_release_date if selected_release_date else ''}"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+    
     seed_action_col1, seed_action_col2, _ = st.columns([1, 1, 4])
     add_to_player = seed_action_col1.button(
         "Add to Player",
@@ -598,7 +588,7 @@ if payload is not None:
             st.divider()
             col_play, col_open = st.columns([1, 2])
             
-            if col_play.button("▶ Play Query Song", key="play_query_song"):
+            if col_play.button("Add Query Song to Player", key="play_query_song"):
                 _set_active_player(
                     query_row["track_name"],
                     query_row["artists"],
@@ -686,7 +676,7 @@ if payload is not None:
 
                 action_col1, action_col2 = st.columns([1, 2])
                 if action_col1.button(
-                    "▶ Play",
+                    "Add to Player",
                     key=f"play_{selected_index}_{i}",
                     disabled=not spotify_available,
                 ):
