@@ -31,9 +31,9 @@ import joblib
 import numpy as np
 import pandas as pd
 
-ARTIFACTS_DIR = Path(__file__).resolve().parents[1] / "artifacts"
+from src.journey import TRAJECTORY_FEATURES, build_trajectory_features, normalize_tempo
 
-TRAJECTORY_FEATURES = ["energy", "valence", "danceability", "tempo_norm"]
+ARTIFACTS_DIR = Path(__file__).resolve().parents[1] / "artifacts"
 
 SCENARIO_KEYWORDS: dict[str, list[str]] = {
     "workout":     ["workout", "electro", "dance", "hip-hop"],
@@ -43,21 +43,6 @@ SCENARIO_KEYWORDS: dict[str, list[str]] = {
     "commute":     ["pop", "indie-pop", "rock", "alternative"],
     "rainy night": ["jazz", "blues", "sad", "r-n-b"],
 }
-
-
-def normalize_tempo(tempo: pd.Series) -> pd.Series:
-    """Clip tempo to [50, 200] BPM then scale to [0, 1] via (tempo - 50) / 150."""
-    return (tempo.clip(lower=50, upper=200) - 50) / 150
-
-
-def trajectory_dataframe(df_encoded: pd.DataFrame) -> pd.DataFrame:
-    """Project the catalog onto the 4-D trajectory feature space."""
-    return pd.DataFrame({
-        "energy": df_encoded["energy"].astype(float),
-        "valence": df_encoded["valence"].astype(float),
-        "danceability": df_encoded["danceability"].astype(float),
-        "tempo_norm": normalize_tempo(df_encoded["tempo"].astype(float)),
-    })
 
 
 def derive_one_scenario(
@@ -92,7 +77,8 @@ def derive_one_scenario(
 def main() -> None:
     feats = joblib.load(ARTIFACTS_DIR / "feature_matrix.joblib")
     df_encoded = feats["df_encoded"]
-    traj_df = trajectory_dataframe(df_encoded)
+    traj_arr = build_trajectory_features(df_encoded)
+    traj_df = pd.DataFrame(traj_arr, columns=TRAJECTORY_FEATURES, index=df_encoded.index)
 
     print(f"Catalog: {len(df_encoded):,} songs across {df_encoded['track_genre'].nunique()} genres")
     print(f"Trajectory features: {TRAJECTORY_FEATURES}\n")
