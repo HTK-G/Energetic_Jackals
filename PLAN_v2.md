@@ -32,6 +32,11 @@
 
 ### Decisions locked in (do NOT relitigate)
 
+- **page_recommend.py — KNN removed:** "Embedding (KNN)" option deleted from rec_mode radio. Recommendation modes are now K-Means cluster and GMM posterior only. The `recommend_with_features` / `feature_comp` code path removed along with it.
+- **page_recommend.py — duplicate search captions removed:** `st.subheader("Find a Song")` and `st.caption("Search for a song or artist, or pick one of the suggestions below.")` deleted; only the `st.text_input` label remains as the single visible prompt.
+- **page_recommend.py — MMR info sentence removed:** The inline `st.info(...)` after MMR reranking no longer appends "Each pick maximizes λ·similarity-to-query − (1-λ)·max-similarity-to-already-chosen." The MMR description in the `st.caption` above the reranking controls is sufficient.
+- **page_model_analysis.py — metrics trimmed to Silhouette only:** Davies-Bouldin, Calinski-Harabasz, ARI, and NMI removed from the comparison table display and from the metric-definitions expander. The ARI/NMI caption note also removed. Rationale: Davies-Bouldin and Calinski-Harabasz are internal metrics redundant with Silhouette; ARI and NMI require genre labels as ground truth (external, not appropriate for internal evaluation section).
+
 - **Trajectory feature scale:** raw 4D, all in [0,1].
   - `energy`, `valence`, `danceability` — used as-is (already [0,1] in dataset).
   - `tempo_norm` — clip to [50, 200] BPM then `(tempo - 50) / 150`.
