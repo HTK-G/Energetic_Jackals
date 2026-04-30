@@ -355,9 +355,6 @@ st.title("Song Search & Recommend")
 st.caption(f"{len(df_encoded):,} songs loaded from Spotify dataset")
 
 # --- Song Search & Selection ---
-st.subheader("Find a Song")
-st.caption("Search for a song or artist, or pick one of the suggestions below.")
-
 search_query = st.text_input(
     "Search for a song or artist",
     placeholder="e.g. Blinding Lights, Drake, Bohemian Rhapsody...",
@@ -490,7 +487,7 @@ with st.container(border=True):
 # Recommendation mode
 rec_mode = st.radio(
     "Recommendation mode",
-    options=["Embedding (KNN)", "K-Means cluster", "GMM posterior"],
+    options=["K-Means cluster", "GMM posterior"],
     horizontal=True,
 )
 
@@ -530,12 +527,7 @@ if st.button("Recommend", type="primary"):
 
         cluster_message = None
         feature_comp = None
-        if rec_mode == "Embedding (KNN)":
-            if use_mmr:
-                recs = engine.recommend(selected_index, top_k=fetch_k)
-            else:
-                recs, feature_comp = engine.recommend_with_features(selected_index, top_k=top_k)
-        elif rec_mode == "K-Means cluster":
+        if rec_mode == "K-Means cluster":
             recs = engine.recommend_by_cluster(selected_index, km_result.labels, top_k=fetch_k)
             cluster_message = f"Recommending within K-Means cluster {int(km_result.labels[selected_index])}"
         else:  # GMM posterior
@@ -633,10 +625,7 @@ if payload is not None:
         )
     
     if payload["rerank_mode"] == "MMR (diverse)":
-        st.info(
-            f"Reranked with MMR (λ={payload['mmr_lambda']}). "
-            "Each pick maximizes λ·similarity-to-query − (1-λ)·max-similarity-to-already-chosen."
-        )
+        st.info(f"Reranked with MMR (λ={payload['mmr_lambda']}).")
 
     # Feature comparison (build inline if not from recommend_with_features)
     if feature_comp is None:

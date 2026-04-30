@@ -259,21 +259,12 @@ with tab_metrics:
     st.subheader("Cluster Evaluation Metrics")
 
     all_metrics: list[ClusterMetrics] = artifacts["metrics_comparison"]
-    comparison_df = metrics_comparison_table(all_metrics)
+    comparison_df = metrics_comparison_table(all_metrics)[["Algorithm", "K", "Silhouette"]]
     st.dataframe(comparison_df, width="stretch")
-
-    st.caption(
-        "**Note**: Genre labels are imperfect ground truth. Low ARI/NMI does not necessarily mean bad clusters "
-        "— it may mean clustering captured acoustic structure that genre labels don't reflect."
-    )
 
     with st.expander("Metric definitions"):
         st.markdown("""
 - **Silhouette Score** [-1, 1]: Measures intra-cluster cohesion vs. inter-cluster separation. Higher is better.
-- **Davies-Bouldin Index** [0, +inf]: Ratio of within-cluster scatter to between-cluster separation. Lower is better.
-- **Calinski-Harabasz Index** [0, +inf]: Ratio of between-cluster variance to within-cluster variance. Higher is better.
-- **ARI (Adjusted Rand Index)** [-1, 1]: Agreement between clusters and genre labels, adjusted for chance. Higher is better.
-- **NMI (Normalized Mutual Information)** [0, 1]: Shared information between clusters and genre labels. Higher is better.
         """)
 
     # Cluster overlap heatmap — K-Means × GMM-full contingency
