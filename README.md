@@ -8,8 +8,7 @@ A Streamlit web app that recommends songs based on audio feature similarity, wit
 ## Features
 
 - **Song Search & Recommend** — Fuzzy search by song name or artist, then get top-K similar songs with cosine similarity scores and per-feature explanations (radar charts, text breakdowns).
-- **Three Recommendation Modes**:
-  - _Embedding (KNN)_ — Nearest neighbors in the full 12D standardized feature space.
+- **Two Recommendation Modes**:
   - _K-Means cluster_ — Restrict recommendations to songs in the same cluster.
   - _GMM posterior_ — Rank songs by cosine similarity of their soft cluster membership vectors.
 - **Music Journey** — Sequential playlist generation and GMM-cluster roaming:
@@ -17,7 +16,7 @@ A Streamlit web app that recommends songs based on audio feature similarity, wit
   - _Custom Trajectory_ — User-defined start/end via sliders; greedy sequential nearest-neighbor with composite scoring generates playlists.
   - _Endless Radio (GMM)_ — GMM-cluster roaming with Bayesian belief update: each song shifts the posterior belief vector, creating a probabilistic drift through feature space.
   - _Russell Emotion Space_ — 2D energy×valence visualization with trajectory overlays.
-- **Cluster Explorer** — Interactive PCA scatter plots, hyperparameter tuning charts (elbow, silhouette, BIC), cluster profiling with auto-generated labels and genre breakdowns, evaluation metrics comparison.
+- **Model Analysis** — Hyperparameter tuning charts (elbow, silhouette, BIC), cluster profiling with auto-generated labels and genre breakdowns, cluster overlap heatmap (K-Means × GMM-full contingency matrix), and 5-method recommendation evaluation (K-Means cluster, GMM posterior vs. random, popularity, genre-match baselines) across genre hit rate and genre coverage metrics.
 
 ## Setup
 
@@ -79,10 +78,10 @@ To enable album art, metadata enrichment, and direct playback in song cards, set
 
 ## Recent Updates
 
+- **Model Analysis page** — unified clustering + recommendation evaluation page with 5-method comparison (K-Means cluster, GMM posterior vs. three baselines), genre hit rate and genre coverage metrics, and cluster overlap heatmap.
 - **Music Journey page** with trajectory playlists (greedy sequential NN), GMM-cluster roaming endless radio, and Russell emotion-space visualization.
 - **Dark coffee theme** — elegant dark brown UI with warm caramel accents and Inter font.
 - Added Spotify-powered song cards with album art, richer metadata, and direct playback controls.
-- Integrated search-driven seed selection so users can search and immediately choose the song they want to recommend from.
 
 ## Dataset
 
@@ -97,7 +96,7 @@ The 11 audio features are transformed into a 12D standardized vector:
 - `key` (0–11 pitch class) is replaced with sine/cosine encoding (2 columns) to preserve cyclical distance.
 - `mode` is kept as binary (0 = minor, 1 = major).
 - All features are standardized with `StandardScaler`.
-- `popularity`, `time_signature`, `explicit`, `duration_ms` are excluded from the feature vector (see PLAN.md for rationale).
+- `popularity`, `time_signature`, `explicit`, `duration_ms` are excluded from the feature vector.
 
 ## Project Structure
 
@@ -107,8 +106,7 @@ Energetic_Jackals/
 │   ├── app.py                  # Streamlit multi-page entry point + theme CSS
 │   ├── page_recommend.py       # Song search & recommendation page
 │   ├── page_journey.py         # Music Journey (trajectory + GMM endless radio)
-│   ├── page_clusters.py        # Cluster explorer page
-│   └── page_evaluation.py      # Recommendation evaluation (stub)
+│   └── page_model_analysis.py  # Clustering analysis + recommendation evaluation
 ├── scripts/
 │   ├── precompute.py           # Offline training: tuning, final fits, PCA, metrics
 │   └── derive_scenario_mappings.py  # Data-driven scenario feature vectors
@@ -122,28 +120,25 @@ Energetic_Jackals/
 │   └── exploration.ipynb
 ├── src/
 │   ├── features.py             # Feature engineering, encoding, scaling
-│   ├── recommend.py            # KNN + cluster-aware recommendation engine
+│   ├── recommend.py            # Cluster-aware recommendation engine
 │   ├── journey.py              # Trajectory generation + GMM-cluster roaming
 │   ├── visualization.py        # Russell emotion-space plots
 │   ├── clustering.py           # K-Means and GMM with hyperparameter tuning
 │   ├── custom_kmeans.py        # From-scratch NumPy K-Means (course requirement)
-│   ├── evaluate.py             # Genre hit rate, internal/external cluster metrics
+│   ├── evaluate.py             # Genre hit rate, internal cluster metrics
 │   └── explain.py              # Feature comparison, radar charts, explanations
-├── PLAN.md                     # Full implementation plan (Phases 1–4)
-├── PLAN_v2.md                  # Implementation plan v2 with batch tracking
 ├── pyproject.toml
 └── requirements.txt
 ```
 
 ## Implementation Status
 
-| Phase | Description                                                                                                      | Status  |
-| ----- | ---------------------------------------------------------------------------------------------------------------- | ------- |
-| 1     | Baseline song-to-song recommendation (KNN, fuzzy search, feature explanations)                                   | Done    |
-| 2     | Clustering analysis — K-Means & GMM (2 of 4 algorithms), evaluation, visualization, cluster-aware recommendation | Done    |
-| 3     | Music Journey — trajectory playlists, GMM-cluster roaming, Russell emotion-space visualization                    | Done    |
-| 4     | Recommendation evaluation — 6 methods × 2 metrics comparison                                                     | Pending |
-| 5     | App polish, cluster overlap heatmap, optional extensions                                                         | Pending |
+| Phase | Description                                                                                                      | Status |
+| ----- | ---------------------------------------------------------------------------------------------------------------- | ------ |
+| 1     | Baseline song-to-song recommendation (fuzzy search, feature explanations)                                        | Done   |
+| 2     | Clustering analysis — K-Means & GMM (full + diag covariance), evaluation, cluster-aware recommendation           | Done   |
+| 3     | Music Journey — trajectory playlists, GMM-cluster roaming, Russell emotion-space visualization                    | Done   |
+| 4     | Model Analysis — 5-method recommendation evaluation, cluster overlap heatmap, Silhouette comparison              | Done   |
 
 ## Technical Stack
 
@@ -151,7 +146,8 @@ Energetic_Jackals/
 | ------------------------ | -------------------------------------------------------- |
 | Language                 | Python 3.11+                                             |
 | Data processing          | pandas, numpy                                            |
-| ML / Clustering          | scikit-learn (KMeans, GaussianMixture, NearestNeighbors) |
+| ML / Clustering          | scikit-learn (GaussianMixture, NearestNeighbors)         |
+| Custom algorithm         | NumPy K-Means from scratch                               |
 | Dimensionality reduction | scikit-learn (PCA)                                       |
 | Persistence              | joblib (precomputed artifacts)                           |
 | Visualization            | plotly (interactive Streamlit charts)                    |

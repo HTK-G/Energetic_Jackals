@@ -53,3 +53,9 @@ Thumbs.db
 # ── Misc ──────────────────────────────────────────────────────────────────────
 .streamlit/secrets.toml
 *.log
+
+# ── Local planning docs (kept locally, not shared) ────────────────────────────
+PLAN.md
+PLAN_v2.md
+CLAUDE.md
+PRECOMPUTE_PLAN.md
