@@ -51,7 +51,7 @@ def tune_kmeans(
     result = TuningResult(k_range=list(k_range))
 
     for k in k_range:
-        km = SKLearnKMeans(n_clusters=k, random_state=random_state, n_init=1)
+        km = SKLearnKMeans(n_clusters=k, random_state=random_state, n_init=10)
         labels = km.fit_predict(feature_matrix)
         result.inertias.append(float(km.inertia_))
         result.silhouette_scores.append(float(
@@ -87,7 +87,7 @@ def tune_gmm(
     k_range: range = range(5, 31),
     covariance_type: str = "full",
     random_state: int = 42,
-    n_init: int = 1,
+    n_init: int = 3,
 ) -> TuningResult:
     """Run GMM over a range of K and collect BIC scores. K selected by min BIC."""
     result = TuningResult(k_range=list(k_range))
