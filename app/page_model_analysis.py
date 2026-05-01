@@ -297,7 +297,7 @@ with tab_metrics:
 with tab_eval:
     st.subheader("Recommendation Engine — 6-method comparison")
     st.caption(
-        "Three of our methods (KNN, K-Means cluster, GMM posterior) versus three "
+        "Two of our methods (K-Means cluster, GMM posterior) versus three "
         "trivial baselines (random, popularity, genre-match) on 500 query songs.  "
         "Source: `scripts/evaluate_recommendations.py`."
     )
@@ -318,7 +318,6 @@ with tab_eval:
 | `random` | Uniform random K from the catalog |
 | `popularity` | Top-K most popular songs (same for every query — cold-start fallback) |
 | `genre_match` | Random K from the same `track_genre` as the query |
-| `knn` | `RecommendationEngine.recommend` — full-feature cosine KNN |
 | `kmeans_cluster` | `RecommendationEngine.recommend_by_cluster` — best K-Means model |
 | `gmm_posterior` | `RecommendationEngine.recommend_by_gmm` — best GMM-full model |
 
@@ -338,7 +337,7 @@ with tab_eval:
                     f"{eval_payload['random_state']})")
 
         # Comparison table
-        order = ["random", "popularity", "genre_match", "knn", "kmeans_cluster", "gmm_posterior"]
+        order = ["random", "popularity", "genre_match", "kmeans_cluster", "gmm_posterior"]
         rows = []
         for name in order:
             r = results[name]
@@ -407,13 +406,13 @@ with tab_eval:
 - `genre_match` (1.000 / 1.0) sits at the top-left of the trade-off:
   perfect hit rate by construction, but every rec has the same genre as
   the query.
-- Our three methods sit in the middle-right: hit rates of
-  {results['knn']['hit_rate_mean']:.3f}–{results['kmeans_cluster']['hit_rate_mean']:.3f}
-  (≈ {results['knn']['hit_rate_mean']/results['random']['hit_rate_mean']:.0f}× random)
-  with coverage {min(results[m]['coverage_mean'] for m in ['knn', 'kmeans_cluster', 'gmm_posterior']):.1f}–{max(results[m]['coverage_mean'] for m in ['knn', 'kmeans_cluster', 'gmm_posterior']):.1f}.
+- Our two methods sit in the middle-right: hit rates of
+  {results['kmeans_cluster']['hit_rate_mean']:.3f}–{results['gmm_posterior']['hit_rate_mean']:.3f}
+  (≈ {results['kmeans_cluster']['hit_rate_mean']/results['random']['hit_rate_mean']:.0f}× random)
+  with coverage {min(results[m]['coverage_mean'] for m in ['kmeans_cluster', 'gmm_posterior']):.1f}–{max(results[m]['coverage_mean'] for m in ['kmeans_cluster', 'gmm_posterior']):.1f}.
   This is the report's central finding: feature-based recommendation
   spans genres while staying relevant.
-- `gmm_posterior` is the highest-coverage of our three at the cost of
+- `gmm_posterior` is the higher-coverage of our two methods at the cost of
   some hit rate — soft cluster membership pulls in songs from more
   genres than hard cluster assignment does.
         """)
