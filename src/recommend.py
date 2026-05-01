@@ -383,7 +383,8 @@ def rerank_mmr(
     mmr_scores: list[float] = []
 
     first = int(np.argmax(rel))
-    selected.append(first); remaining.discard(first)
+    selected.append(first)
+    remaining.discard(first)
     mmr_scores.append(float(rel[first]))
 
     while len(selected) < top_k and remaining:
@@ -392,7 +393,8 @@ def rerank_mmr(
         scores = lam * rel[rem] - (1.0 - lam) * redundancy
         local_best = int(np.argmax(scores))
         chosen = int(rem[local_best])
-        selected.append(chosen); remaining.discard(chosen)
+        selected.append(chosen)
+        remaining.discard(chosen)
         mmr_scores.append(float(scores[local_best]))
 
     out = recs.iloc[selected].copy().reset_index(drop=True)
