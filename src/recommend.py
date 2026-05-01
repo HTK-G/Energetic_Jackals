@@ -354,8 +354,11 @@ def rerank_mmr(
         return recs.head(0)
 
     # Resolve each rec back to its catalog row index.
+    # Track recs_pos in parallel so we can index back into recs correctly even
+    # when some rows are skipped (len(match)==0 guard).
     cand_indices: list[int] = []
-    for _, rec in recs.iterrows():
+    recs_pos: list[int] = []
+    for i, (_, rec) in enumerate(recs.iterrows()):
         match = engine.df[
             (engine.df["track_name"] == rec["track_name"])
             & (engine.df["artists"] == rec["artists"])
@@ -363,6 +366,7 @@ def rerank_mmr(
         if len(match) == 0:
             continue
         cand_indices.append(int(match.index[0]))
+        recs_pos.append(i)
     if not cand_indices:
         return recs.head(0)
 
@@ -395,6 +399,6 @@ def rerank_mmr(
         selected.append(chosen); remaining.discard(chosen)
         mmr_scores.append(float(scores[local_best]))
 
-    out = recs.iloc[selected].copy().reset_index(drop=True)
+    out = recs.iloc[[recs_pos[s] for s in selected]].copy().reset_index(drop=True)
     out["mmr_score"] = mmr_scores
     return out

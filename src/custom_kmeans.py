@@ -18,15 +18,44 @@ class CustomKMeans:
         self.inertia_ = None
         self.random_state = random_state
 
+    def _kmeans_plus_plus_init(self, X: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+        """K-Means++ centroid initialization.
+
+        Pick the first centroid uniformly at random, then each subsequent
+        centroid with probability proportional to D(x)^2 — the squared
+        distance from x to the nearest already-chosen centroid.  This
+        reduces expected inertia and the number of iterations to convergence
+        compared to plain random initialization.
+        """
+        n_samples = X.shape[0]
+        first_idx = int(rng.integers(0, n_samples))
+        centroids = [X[first_idx].copy()]
+
+        for _ in range(1, self.n_clusters):
+            # Squared distance from each point to its nearest centroid so far.
+            centroid_matrix = np.array(centroids)          # (k_so_far, n_features)
+            diffs = X[:, np.newaxis, :] - centroid_matrix  # (n, k_so_far, n_features)
+            sq_dists = (diffs ** 2).sum(axis=2)            # (n, k_so_far)
+            min_sq_dists = sq_dists.min(axis=1)            # (n,)  D(x)^2
+
+            # Sample next centroid proportional to D(x)^2.
+            total = min_sq_dists.sum()
+            if total == 0:
+                # All remaining points coincide with existing centroids; fall back.
+                probs = np.ones(n_samples) / n_samples
+            else:
+                probs = min_sq_dists / total
+            next_idx = int(rng.choice(n_samples, p=probs))
+            centroids.append(X[next_idx].copy())
+
+        return np.array(centroids)
+
     def fit(self, X):
         X = np.asarray(X, dtype=float)
         rng = np.random.default_rng(self.random_state)
 
-        # initialize random clusters
-        initial_cluster_indices = rng.choice(
-            X.shape[0], size=self.n_clusters, replace=False
-        )
-        self.centroids = X[initial_cluster_indices].copy()
+        # K-Means++ initialization
+        self.centroids = self._kmeans_plus_plus_init(X, rng)
 
         for i in range(self.max_iters):
             labels = self._assign_clusters(X)
