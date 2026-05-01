@@ -82,14 +82,14 @@ def main() -> None:
         f"Tune GMM (full covariance, K in [{GMM_K_RANGE.start}, {GMM_K_RANGE.stop - 1}])",
         ARTIFACTS_DIR / "tuning_gmm_full.joblib",
         args.force,
-        lambda: tune_gmm(feature_matrix, k_range=GMM_K_RANGE, covariance_type="full"),
+        lambda: tune_gmm(feature_matrix, k_range=GMM_K_RANGE, covariance_type="full", n_init=1),
     )
 
     tuning_gmm_diag = _step(
         f"Tune GMM (diagonal covariance, K in [{GMM_K_RANGE.start}, {GMM_K_RANGE.stop - 1}])",
         ARTIFACTS_DIR / "tuning_gmm_diag.joblib",
         args.force,
-        lambda: tune_gmm(feature_matrix, k_range=GMM_K_RANGE, covariance_type="diag"),
+        lambda: tune_gmm(feature_matrix, k_range=GMM_K_RANGE, covariance_type="diag", n_init=1),
     )
 
     gmm_full_best = _step(
