@@ -46,20 +46,23 @@ def genre_hit_rate(
     if recs.empty:
         return 0.0
 
-    query_vector = engine.feature_matrix[song_index].reshape(1, -1)
-    distances, indices = engine.nn.kneighbors(query_vector, n_neighbors=min(top_k + 1, engine.k_neighbors))
-    indices = indices.flatten()
-    indices = indices[indices != song_index][:top_k]
-
     hits = 0
-    for idx in indices:
-        rec_genres = parse_genre_set(engine.df.iloc[idx].get("all_genres", ""))
-        if not rec_genres:
-            rec_genres = {engine.df.iloc[idx]["track_genre"].strip().lower()}
+    for _, rec in recs.iterrows():
+        # Look up the full catalog row to access all_genres.
+        match = engine.df[
+            (engine.df["track_name"] == rec["track_name"])
+            & (engine.df["artists"] == rec["artists"])
+        ]
+        if match.empty:
+            rec_genres = {rec.get("track_genre", "").strip().lower()}
+        else:
+            rec_genres = parse_genre_set(match.iloc[0].get("all_genres", ""))
+            if not rec_genres:
+                rec_genres = {match.iloc[0]["track_genre"].strip().lower()}
         if query_genres & rec_genres:
             hits += 1
 
-    return hits / len(indices) if len(indices) > 0 else 0.0
+    return hits / len(recs)
 
 
 def average_genre_hit_rate(
