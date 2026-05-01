@@ -8,15 +8,19 @@ class CustomKMeans:
         max_iters: int = 100,
         tol: float = 1e-4,
         random_state=None,
+        n_init: int = 10,
     ):
         self.n_clusters = n_clusters
         self.max_iters = max_iters
         self.tol = tol
+        self.n_init = n_init
 
         self.centroids = None
         self.labels_ = None
         self.inertia_ = None
         self.random_state = random_state
+
+    # ── Initialization ────────────────────────────────────────────────────────
 
     def _kmeans_plus_plus_init(self, X: np.ndarray, rng: np.random.Generator) -> np.ndarray:
         """K-Means++ centroid initialization.
@@ -50,56 +54,78 @@ class CustomKMeans:
 
         return np.array(centroids)
 
+    # ── Single run ────────────────────────────────────────────────────────────
+
+    def _fit_once(
+        self, X: np.ndarray, rng: np.random.Generator
+    ) -> tuple[np.ndarray, np.ndarray, float]:
+        """One full K-Means run from a fresh K-Means++ initialization."""
+        centroids = self._kmeans_plus_plus_init(X, rng)
+
+        for _ in range(self.max_iters):
+            labels = self._assign_clusters(X, centroids)
+            new_centroids = np.zeros_like(centroids)
+
+            for k in range(self.n_clusters):
+                pts = X[labels == k]
+                # If cluster is empty, reinitialize to a random data point.
+                new_centroids[k] = (
+                    X[rng.integers(0, X.shape[0])] if len(pts) == 0 else pts.mean(axis=0)
+                )
+
+            # A3: max per-centroid shift, not Frobenius norm over all centroids.
+            # Standard convergence criterion: max_k ||c_k_new − c_k_old||.
+            shift = np.linalg.norm(new_centroids - centroids, axis=1).max()
+            centroids = new_centroids
+
+            if shift < self.tol:
+                break
+
+        labels = self._assign_clusters(X, centroids)
+        inertia = self._compute_inertia(X, labels, centroids)
+        return centroids, labels, inertia
+
+    # ── Public API ────────────────────────────────────────────────────────────
+
     def fit(self, X):
         X = np.asarray(X, dtype=float)
         rng = np.random.default_rng(self.random_state)
 
-        # K-Means++ initialization
-        self.centroids = self._kmeans_plus_plus_init(X, rng)
+        # A4: run n_init independent restarts; keep the lowest-inertia result.
+        best_centroids, best_labels, best_inertia = None, None, float("inf")
+        for _ in range(self.n_init):
+            centroids, labels, inertia = self._fit_once(X, rng)
+            if inertia < best_inertia:
+                best_centroids, best_labels, best_inertia = centroids, labels, inertia
 
-        for i in range(self.max_iters):
-            labels = self._assign_clusters(X)
-            new_centroids = np.zeros_like(self.centroids)
-
-            for clusteridx in range(self.n_clusters):
-                clusterpoints = X[labels == clusteridx]
-                # if cluster is empty, reinizialize to random data point
-                if len(clusterpoints) == 0:
-                    new_centroids[clusteridx] = X[rng.integers(0, X.shape[0])]
-                else:
-                    new_centroids[clusteridx] = np.mean(clusterpoints, axis=0)
-
-            centroid_shift = np.linalg.norm(new_centroids - self.centroids)
-            self.centroids = new_centroids
-
-            if centroid_shift < self.tol:
-                break
-        self.labels_ = self._assign_clusters(X)
-        self.inertia_ = self._compute_inertia(X, self.labels_)
+        self.centroids = best_centroids
+        self.labels_ = best_labels
+        self.inertia_ = best_inertia
         return self
 
     def predict(self, X):
         X = np.asarray(X, dtype=float)
         if self.centroids is None:
             raise ValueError("Model hasn't been fitted yet")
-        return self._assign_clusters(X)
+        return self._assign_clusters(X, self.centroids)
 
     def fit_predict(self, X):
         self.fit(X)
         return self.labels_
 
-    def _assign_clusters(self, X):
-        distances = np.linalg.norm(
-            X[:, np.newaxis] - self.centroids, axis=2
-        )  # shape of x[:,np.newaxis] - self.centroids is (n_samples, k, n_features)
-        # gets the pairwise distances of each point and each cluster. computes distances across features
+    # ── Internals ─────────────────────────────────────────────────────────────
+
+    def _assign_clusters(self, X: np.ndarray, centroids: np.ndarray) -> np.ndarray:
+        # (n_samples, n_clusters, n_features) pairwise distances
+        distances = np.linalg.norm(X[:, np.newaxis, :] - centroids, axis=2)
         return np.argmin(distances, axis=1)
 
-    def _compute_inertia(self, X, labels):
-        # sum of squared distances between each datapoint and its centroid
+    def _compute_inertia(
+        self, X: np.ndarray, labels: np.ndarray, centroids: np.ndarray
+    ) -> float:
         total = 0.0
-        for clusteridx in range(self.n_clusters):
-            clusterpoints = X[labels == clusteridx]
-            if len(clusterpoints) > 0:
-                total += np.sum((clusterpoints - self.centroids[clusteridx]) ** 2)
+        for k in range(self.n_clusters):
+            pts = X[labels == k]
+            if len(pts) > 0:
+                total += float(np.sum((pts - centroids[k]) ** 2))
         return total

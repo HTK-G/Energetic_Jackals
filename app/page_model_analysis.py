@@ -61,6 +61,10 @@ def _cluster_feature_means(df: pd.DataFrame, labels: np.ndarray) -> pd.DataFrame
     df_work = df.copy()
     df_work["cluster"] = labels
     feature_cols = [c for c in FEATURE_COLUMNS_ENCODED if c in df_work.columns]
+    # Include raw tempo for auto-labeling (not in FEATURE_COLUMNS_ENCODED because
+    # key was replaced by key_sin/key_cos, but tempo is still a raw column).
+    if "tempo" in df_work.columns and "tempo" not in feature_cols:
+        feature_cols = feature_cols + ["tempo"]
     return df_work.groupby("cluster")[feature_cols].mean()
 
 
