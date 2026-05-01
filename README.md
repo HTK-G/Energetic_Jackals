@@ -36,14 +36,15 @@ drops from tens of minutes to a few seconds.
 ```bash
 uv run python -m scripts.precompute
 uv run python -m scripts.derive_scenario_mappings
+uv run python -m scripts.evaluate_recommendations
 ```
 
-This takes ~10–20 minutes the first time. Re-run with `--force` if the dataset
-changes:
+`precompute` takes ~10–20 minutes; `evaluate_recommendations` takes ~5–10 minutes. Re-run with `--force` if the dataset changes:
 
 ```bash
 uv run python -m scripts.precompute --force
 uv run python -m scripts.derive_scenario_mappings
+uv run python -m scripts.evaluate_recommendations
 ```
 
 The `artifacts/` directory is gitignored — each developer regenerates it locally.
