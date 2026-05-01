@@ -405,7 +405,8 @@ else:
         if len(found):
             idx = int(found.index[0])
             if idx not in seen:
-                seen.add(idx); option_indices.append(idx)
+                seen.add(idx)
+                option_indices.append(idx)
 
     if not option_indices:
         st.warning("Could not map search results to the recommendation catalog.")

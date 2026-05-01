@@ -19,7 +19,6 @@ import pandas as pd
 import streamlit as st
 
 from src.journey import (
-    TRAJECTORY_FEATURES,
     build_journey_playlist,
     build_trajectory_features,
     gmm_endless_next,
@@ -396,7 +395,7 @@ with tab_custom:
                 data=csv_data,
                 file_name=f"{first_song}_recommendations.csv",
                 mime="text/csv",
-                key=f"download_custom",
+                key="download_custom",
             )
         for idx, (_, row) in enumerate(playlist.iterrows()):
             step = int(row["step"]) + 1
@@ -592,7 +591,8 @@ with tab_endless:
 
         # Per-step drift readout (belief bar chart removed per Batch 8)
         if len(history) >= 2:
-            a = history[-1]; b = history[-2]
+            a = history[-1]
+            b = history[-2]
             de = a["actual_energy"] - b["actual_energy"]
             dv = a["actual_valence"] - b["actual_valence"]
             d_total = float(np.hypot(de, dv))

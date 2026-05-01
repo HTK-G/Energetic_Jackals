@@ -31,7 +31,7 @@ import joblib
 import numpy as np
 import pandas as pd
 
-from src.journey import TRAJECTORY_FEATURES, build_trajectory_features, normalize_tempo
+from src.journey import TRAJECTORY_FEATURES, build_trajectory_features
 
 ARTIFACTS_DIR = Path(__file__).resolve().parents[1] / "artifacts"
 
